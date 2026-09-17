@@ -10,7 +10,7 @@ Three conversation modes with distinct personalities:
 - **Educational** — Clear explanations that build genuine understanding
 - **Deep** — Philosophical exploration that challenges assumptions
 
-Runs locally with nothing but an ElevenLabs API key and three agent IDs. No auth, no database, no deploy — clone, set env vars, `bun dev`.
+Runs locally with nothing but an ElevenLabs API key and three agent IDs. Your API key is entered in the app and stored server-side — it never ships to the browser. Clone, set env vars, `bun dev`.
 
 > Looking for the full SaaS version with Clerk auth, Convex DB, and billing? See the [`full-version`](../../tree/full-version) branch.
 
@@ -56,6 +56,8 @@ ELEVENLABS_AGENT_ID_EDU=agent_...
 ELEVENLABS_AGENT_ID_DEEP=agent_...
 ```
 
+The API key is optional here — you can also enter it in the app's Settings panel after starting the server. It's sealed server-side into an httpOnly cookie and never exposed to the browser bundle.
+
 ### 4. Run the dev server
 
 ```bash
@@ -85,16 +87,20 @@ src/
   api/
     agents.ts           # Agent resolution + conversation tokens
     agentPrompts.ts     # System prompts for each conversation mode
-    knowledgebase.ts    # In-memory document store for context injection
+    knowledgebase.ts    # Document store for context injection (SQLite-backed)
     auditAgents.ts      # ElevenLabs agent configuration validator
   components/
     LandingPage.tsx     # Main app view (topic + mode selection)
     ConversationView.tsx # Active conversation UI with waveform
     SubjectSelector.tsx # Topic picker (1-3 topics)
     ModeSelector.tsx    # Conversation mode picker
-    DocumentUpload.tsx  # Knowledge base upload
-    UploadDialog.tsx    # Upload modal
+    ApiKeySettings.tsx  # In-app ElevenLabs API key entry (server-side sealed)
+    UploadDialog.tsx    # Knowledge base upload modal
     ui/                 # Shadcn/UI components
+  lib/
+    db.ts               # bun:sqlite singleton (lazy, hot-reload safe)
+    session.ts          # iron-session sealed-cookie API key storage
+    poduApi.ts          # Typed client-side API seam
 ```
 
 ## How It Works

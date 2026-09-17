@@ -1,9 +1,6 @@
 # OS files
 .DS_Store
 
-# Vercel serverless stubs (not canonical — Bun server in src/ is the backend)
-/api/
-
 # Logs
 logs
 *.log
@@ -152,9 +149,5 @@ podu.db-shm
 podu.db-wal
 podu.db-journal
 
-# GSD (Get Shit Done) planning artifacts
-/.planning/
-/.gsd/
-**/.planning/
-**/.gsd/
+# Local session secret (auto-generated at runtime)
 .podu-session-secret
