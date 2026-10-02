@@ -27,7 +27,7 @@ export interface AuditReport {
 
 // Known latest/recommended models
 const RECOMMENDED = {
-  ttsModels: ["eleven_v3", "eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2"],
+  ttsModels: ["eleven_v4_turbo", "eleven_v4", "eleven_v3_conversational", "eleven_v3", "eleven_flash_v2_5", "eleven_multilingual_v2"],
   llmProviders: ["anthropic", "openai", "google", "elevenlabs"],
 };
 
@@ -53,25 +53,26 @@ function analyzeAgent(config: Record<string, unknown>, mode: string, agentId: st
   const prompt = agent?.prompt as Record<string, unknown> | undefined;
   const tts = conversationConfig?.tts as Record<string, unknown> | undefined;
   const stt = conversationConfig?.stt as Record<string, unknown> | undefined;
-  const llm = prompt?.llm as Record<string, unknown> | undefined;
+  const llm = prompt?.llm as Record<string, unknown> | string | undefined;
+  const legacyLlm = typeof llm === "object" ? llm : undefined;
 
   const ttsModel = (tts?.model_id as string) || (tts?.model as string) || "unknown";
   const voiceId = (tts?.voice_id as string) || "unknown";
-  const llmModel = (llm?.model as string) || (llm?.model_id as string) || "unknown";
-  const llmProvider = (llm?.provider as string) || "unknown";
+  const llmModel = (typeof llm === "string" ? llm : legacyLlm?.model as string) || (legacyLlm?.model_id as string) || "unknown";
+  const llmProvider = (legacyLlm?.provider as string) || "unknown";
   const sttModel = (stt?.model as string) || (stt?.model_id as string) || "unknown";
   const agentName = (config.name as string) || "unnamed";
 
   // Check for deprecated prompt.tools (should use tool_ids after July 2025)
   const tools = prompt?.tools as unknown[] | undefined;
-  const hasDeprecatedTools = Array.isArray(tools) && tools.length > 0;
+  const hasDeprecatedTools = Array.isArray(tools) && tools.some(tool => !tool || typeof tool !== "object" || !("type" in tool));
   if (hasDeprecatedTools) {
     issues.push(`Uses deprecated prompt.tools (${tools.length} tools). Migrate to prompt.tool_ids.`);
   }
 
   // Check TTS model
   if (ttsModel !== "unknown" && !RECOMMENDED.ttsModels.includes(ttsModel)) {
-    issues.push(`TTS model "${ttsModel}" may be outdated. Recommended: eleven_v3 or eleven_flash_v2_5.`);
+    issues.push(`TTS model "${ttsModel}" may be outdated. Recommended for PODU live conversations: eleven_v4_turbo.`);
   }
 
   // Check LLM provider

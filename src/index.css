@@ -1033,3 +1033,35 @@ p {
 .auth-form [data-clerk-dev-mode-notice] * {
   color: var(--foreground) !important;
 }
+
+.recording-options,
+.conversation-history {
+  border-top: 1px solid var(--border);
+  margin-top: 28px;
+  padding-top: 24px;
+}
+.recording-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  font-size: 14px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.recording-option input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--glaucous);
+}
+.recording-options p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+  margin: 8px 0 0;
+}
+.conversation-history h2 {
+  font-size: 20px;
+  margin-bottom: 0;
+}

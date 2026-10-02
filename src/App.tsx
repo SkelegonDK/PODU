@@ -3,9 +3,10 @@ import { LandingPage } from "./components/LandingPage";
 import { WelcomePage } from "./components/WelcomePage";
 import { AccountUnavailable, AuthPage } from "./components/AuthPage";
 import { ClerkApp } from "./components/ClerkApp";
+import { clientConfig } from "./shared/publicConfig";
 
 // This is the only public key compiled into the browser. No secret key is read here.
-const publishableKey = process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const publishableKey = clientConfig.clerkPublishableKey;
 
 class AccountErrorBoundary extends Component<
   { children: ReactNode },
@@ -38,8 +39,8 @@ class AccountErrorBoundary extends Component<
 export function App() {
   const path = window.location.pathname;
   if (path === "/welcome")
-    return <WelcomePage localPreview={!publishableKey} />;
-  if (publishableKey)
+    return <WelcomePage localPreview={clientConfig.local} />;
+  if (!clientConfig.local && publishableKey)
     return (
       <AccountErrorBoundary>
         <ClerkApp publishableKey={publishableKey} />
@@ -47,7 +48,13 @@ export function App() {
     );
 
   if (path.startsWith("/sign-up") || path.startsWith("/sign-in"))
-    return <AccountUnavailable signUp={path.startsWith("/sign-up")} />;
+    return (
+      <AccountUnavailable
+        signUp={path.startsWith("/sign-up")}
+        localPreview={clientConfig.local}
+      />
+    );
+  if (!clientConfig.local) return <WelcomePage />;
   return (
     <LandingPage
       accountControls={

@@ -18,7 +18,12 @@ export interface MockApiErrorOptions {
   delay?: number;
   status?: number;
   error?: string;
-  code?: "missing_api_key" | "invalid_api_key" | "missing_agent_id" | "upstream_error" | string;
+  code?:
+    | "missing_api_key"
+    | "invalid_api_key"
+    | "missing_agent_id"
+    | "upstream_error"
+    | string;
 }
 
 /**
@@ -26,7 +31,7 @@ export interface MockApiErrorOptions {
  */
 export async function mockAgentsApi(
   page: Page,
-  options: MockApiOptions = {}
+  options: MockApiOptions = {},
 ): Promise<void> {
   const {
     delay = 0,
@@ -57,7 +62,7 @@ export async function mockAgentsApi(
  */
 export async function mockAgentsApiError(
   page: Page,
-  options: MockApiErrorOptions = {}
+  options: MockApiErrorOptions = {},
 ): Promise<void> {
   const {
     delay = 0,
@@ -74,22 +79,29 @@ export async function mockAgentsApiError(
  */
 export async function mockConversationTokenApi(
   page: Page,
-  options: MockApiOptions = {}
+  options: MockApiOptions = {},
 ): Promise<void> {
-  const { delay = 0, status = 200, body = { token: "test-conversation-token" } } = options;
+  const {
+    delay = 0,
+    status = 200,
+    body = { token: "test-conversation-token" },
+  } = options;
 
-  await page.route("**/api/agents/*/conversation-token", async (route: Route) => {
-    if (route.request().method() === "GET") {
-      await new Promise((resolve) => setTimeout(resolve, delay));
-      await route.fulfill({
-        status,
-        contentType: "application/json",
-        body: JSON.stringify(body),
-      });
-    } else {
-      await route.fallback();
-    }
-  });
+  await page.route(
+    "**/api/agents/*/conversation-token*",
+    async (route: Route) => {
+      if (route.request().method() === "GET") {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        await route.fulfill({
+          status,
+          contentType: "application/json",
+          body: JSON.stringify(body),
+        });
+      } else {
+        await route.fallback();
+      }
+    },
+  );
 }
 
 /**
@@ -112,7 +124,7 @@ export interface ConfigStatusOverrides {
 export async function mockConfigApi(
   page: Page,
   overrides: ConfigStatusOverrides = {},
-  options: Pick<MockApiOptions, "delay" | "status"> = {}
+  options: Pick<MockApiOptions, "delay" | "status"> = {},
 ): Promise<void> {
   const { delay = 0, status = 200 } = options;
 
@@ -150,7 +162,7 @@ export async function mockConfigApi(
  */
 export async function mockDocumentsUploadApi(
   page: Page,
-  options: MockApiOptions = {}
+  options: MockApiOptions = {},
 ): Promise<void> {
   const {
     delay = 0,
@@ -181,7 +193,7 @@ export async function mockDocumentsUploadApi(
  */
 export async function mockDocumentsDeleteApi(
   page: Page,
-  options: MockApiOptions = {}
+  options: MockApiOptions = {},
 ): Promise<void> {
   const { delay = 0, status = 200, body = { success: true } } = options;
 
@@ -204,7 +216,7 @@ export async function mockDocumentsDeleteApi(
  */
 export async function mockDocumentsListApi(
   page: Page,
-  options: MockApiOptions = {}
+  options: MockApiOptions = {},
 ): Promise<void> {
   const { delay = 0, status = 200, body = { documents: [] } } = options;
 
@@ -233,11 +245,13 @@ export async function setupApiMocks(
     uploadDelay?: number;
     deleteDelay?: number;
     config?: ConfigStatusOverrides;
-  } = {}
+  } = {},
 ): Promise<void> {
   await mockConfigApi(page, options.config);
   await mockAgentsApi(page, { delay: options.agentsDelay ?? 1200 });
-  await mockConversationTokenApi(page, { delay: options.conversationTokenDelay ?? 0 });
+  await mockConversationTokenApi(page, {
+    delay: options.conversationTokenDelay ?? 0,
+  });
   await mockDocumentsUploadApi(page, { delay: options.uploadDelay ?? 800 });
   await mockDocumentsDeleteApi(page, { delay: options.deleteDelay ?? 300 });
   await mockDocumentsListApi(page);

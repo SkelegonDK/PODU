@@ -7,6 +7,8 @@ import { Brand } from "./Brand";
 import { Button } from "./ui/button";
 import { AlertCircle, Settings2, Mic } from "lucide-react";
 import { ApiKeySettings } from "./ApiKeySettings";
+import { ConversationHistory } from "./ConversationHistory";
+import { clientConfig } from "../shared/publicConfig";
 import type { ConfigStatus, ConversationMode } from "@/shared/config";
 import * as poduApi from "@/lib/poduApi";
 import { useRequest } from "@/lib/useRequest";
@@ -32,6 +34,8 @@ export function LandingPage({
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedMode, setSelectedMode] = useState<ConversationMode>("fun");
   const [isLoading, setIsLoading] = useState(false);
+  const [saveRecording, setSaveRecording] = useState(false);
+  const [resumeId, setResumeId] = useState<string | undefined>();
   // Holds mapped copy, never a raw string, so a rendered message can't be fed
   // back into a mapper.
   const [startFailure, setStartFailure] = useState<FailureCopy | null>(null);
@@ -92,7 +96,7 @@ export function LandingPage({
       const latest = await runConfig(poduApi.getConfig);
       if (latest.ok && !latest.data.hasApiKey) {
         setStartFailure(failureCopy("missing_api_key", "landing"));
-        setSettingsOpen(true);
+        if (clientConfig.local) setSettingsOpen(true);
         return;
       }
       if (latest.ok && !latest.data.agentIds[selectedMode]) {
@@ -102,7 +106,10 @@ export function LandingPage({
         return;
       }
 
-      const result = await poduApi.getAgent(selectedMode, selectedSubjects);
+      const result = await poduApi.getAgent(selectedMode, selectedSubjects, {
+        resumeId,
+        saveRecording,
+      });
       if (!result.ok) {
         // Server codes are mapped here and nowhere else; the result is stored
         // as-is rather than thrown, so it never reaches describeException().
@@ -111,7 +118,7 @@ export function LandingPage({
         });
         console.error("Failed to start conversation:", result.error);
         setStartFailure(failure);
-        if (requiresApiKeyAction(failure.code)) {
+        if (clientConfig.local && requiresApiKeyAction(failure.code)) {
           setSettingsOpen(true);
         }
         return;
@@ -132,12 +139,14 @@ export function LandingPage({
     return (
       <ConversationView
         mode={selectedMode}
+        conversationId={agent.conversationId}
         agentId={agent.agentId}
         systemPrompt={agent.systemPrompt}
         firstMessage={agent.firstMessage}
         subjectCount={selectedSubjects.length}
         onClose={() => {
           setAgent(null);
+          setResumeId(undefined);
           requestAnimationFrame(() =>
             document
               .querySelector<HTMLButtonElement>('[data-testid="play-button"]')
@@ -156,15 +165,17 @@ export function LandingPage({
       <header className="site-header">
         <Brand subtitle="Room for a conversation." />
         <div className="account-nav">
-          <button
-            type="button"
-            onClick={() => setSettingsOpen(true)}
-            aria-label="API settings"
-            className="settings-button"
-          >
-            <Settings2 size={18} aria-hidden="true" />
-            <span>Settings</span>
-          </button>
+          {clientConfig.local && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              aria-label="API settings"
+              className="settings-button"
+            >
+              <Settings2 size={18} aria-hidden="true" />
+              <span>Settings</span>
+            </button>
+          )}
           {accountControls}
         </div>
       </header>
@@ -194,10 +205,41 @@ export function LandingPage({
         <div className="conversation-setup">
           <SubjectSelector
             selected={selectedSubjects}
-            onSelectionChange={setSelectedSubjects}
+            onSelectionChange={(subjects) => {
+              setSelectedSubjects(subjects);
+              setResumeId(undefined);
+            }}
             maxSelections={3}
           />
           <ModeSelector selected={selectedMode} onSelect={setSelectedMode} />
+          {!clientConfig.local && (
+            <div className="recording-options">
+              <label className="recording-option">
+                <input
+                  type="checkbox"
+                  checked={saveRecording}
+                  onChange={(event) => setSaveRecording(event.target.checked)}
+                />
+                <span>Save audio so I can listen again.</span>
+              </label>
+              <p>
+                Transcripts and topic notes are saved to your account.
+                ElevenLabs also processes and may retain call audio.
+              </p>
+              {resumeId && (
+                <p>
+                  Continuing with notes from an earlier conversation.{" "}
+                  <button
+                    type="button"
+                    className="quiet-link"
+                    onClick={() => setResumeId(undefined)}
+                  >
+                    Cancel continuation
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
           <div className="start-section">
             <div id="start-guidance" className="start-guidance" role="status">
               {startFailure ? (
@@ -209,22 +251,25 @@ export function LandingPage({
                 <p className="inline-error">
                   {config.error?.status === 401
                     ? failureCopy("authentication_error", "landing").message
-                    : "We couldn’t connect to PODU. Please try again."}
+                    : config.error?.code === "backend_not_configured"
+                      ? "PODU’s voice service is still being set up. Please try again later."
+                      : "We couldn’t connect to PODU. Please try again."}
                 </p>
               ) : config.status === "loading" && !configStatus ? (
                 <p>Getting your conversation ready…</p>
               ) : needsApiKey ? (
                 <p>
-                  Connect ElevenLabs in Settings to start your local
-                  conversation.
+                  {clientConfig.local
+                    ? "Connect ElevenLabs in Settings to start your local conversation."
+                    : "PODU’s voice service is still being set up. Please try again later."}
                 </p>
               ) : missingAgentForMode ? (
                 <p>
-                  {
-                    failureCopy("missing_agent_id", "setup", {
-                      mode: selectedMode,
-                    }).message
-                  }
+                  {clientConfig.local
+                    ? failureCopy("missing_agent_id", "setup", {
+                        mode: selectedMode,
+                      }).message
+                    : "This conversation style is still being set up. Please try another style."}
                 </p>
               ) : selectedSubjects.length === 0 ? (
                 <p>Choose at least one topic to get started.</p>
@@ -244,11 +289,15 @@ export function LandingPage({
                 onClick={handleStart}
                 describedBy="start-guidance microphone-note"
               />
-              {(needsApiKey || requiresApiKeyAction(startFailure?.code)) && (
-                <Button variant="outline" onClick={() => setSettingsOpen(true)}>
-                  Open Settings
-                </Button>
-              )}
+              {clientConfig.local &&
+                (needsApiKey || requiresApiKeyAction(startFailure?.code)) && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setSettingsOpen(true)}
+                  >
+                    Open Settings
+                  </Button>
+                )}
               {(config.error?.status === 401 ||
                 startFailure?.action === "sign_in") && (
                 <a className="quiet-link" href="/sign-in">
@@ -279,6 +328,28 @@ export function LandingPage({
               microphone access before you speak.
             </p>
           </div>
+          {!clientConfig.local && (
+            <ConversationHistory
+              onResume={(id, mode, topics) => {
+                const ids: Record<string, string> = {
+                  Technology: "tech",
+                  Science: "science",
+                  History: "history",
+                  Philosophy: "philosophy",
+                  Business: "business",
+                  "Health & Wellness": "health",
+                  "Arts & Culture": "arts",
+                };
+                setSelectedSubjects(
+                  topics
+                    .map((topic) => ids[topic])
+                    .filter((id): id is string => !!id),
+                );
+                setSelectedMode(mode);
+                setResumeId(id);
+              }}
+            />
+          )}
         </div>
       </main>
       <footer className="site-footer">
@@ -286,7 +357,7 @@ export function LandingPage({
         <span>Your conversation partner is AI.</span>
       </footer>
       <ApiKeySettings
-        open={settingsOpen}
+        open={clientConfig.local && settingsOpen}
         onOpenChange={setSettingsOpen}
         status={configStatus}
         onSaved={async () => {

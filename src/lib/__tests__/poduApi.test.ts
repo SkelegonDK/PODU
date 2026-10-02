@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { configureAccessToken, getConfig, getAgent } from "../poduApi";
+import {
+  configureAccessToken,
+  getConfig,
+  getAgent,
+  getConversationToken,
+} from "../poduApi";
 import { failureCopyFromApiError } from "../failureCopy";
 
 const originalFetch = globalThis.fetch;
@@ -11,6 +16,33 @@ afterEach(() => {
 });
 
 describe("Clerk API session handoff", () => {
+  test("preserves continuation, recording consent, and the prepared session when requesting a token", async () => {
+    const requests: { url: string; body: unknown }[] = [];
+    cleanup = configureAccessToken(async () => "convex-token");
+    globalThis.fetch = mock(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({
+          url: String(input),
+          body: init?.body ? JSON.parse(String(init.body)) : null,
+        });
+        return Response.json({});
+      },
+    ) as unknown as typeof fetch;
+    await getAgent("deep", ["philosophy"], {
+      resumeId: "prior-session",
+      saveRecording: true,
+    });
+    await getConversationToken("agent/id", "session/id");
+    expect(requests[0]?.body).toEqual({
+      mode: "deep",
+      subjects: ["philosophy"],
+      resumeId: "prior-session",
+      saveRecording: true,
+    });
+    expect(requests[1]?.url).toBe(
+      "/api/agents/agent%2Fid/conversation-token?conversationId=session%2Fid",
+    );
+  });
   test("refreshes the bearer token for each request and preserves JSON headers", async () => {
     const requests: Headers[] = [];
     let tokenNumber = 0;

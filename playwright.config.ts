@@ -59,6 +59,7 @@ export default defineConfig({
      * ./podu.db document library.
      */
     env: {
+      PODU_LOCAL_MODE: "true",
       PODU_DB_PATH: join(tmpdir(), "podu-e2e.db"),
       BUN_PUBLIC_CLERK_PUBLISHABLE_KEY: "",
     },

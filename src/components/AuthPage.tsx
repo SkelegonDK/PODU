@@ -53,18 +53,27 @@ export function AuthPage({
   );
 }
 
-export function AccountUnavailable({ signUp }: { signUp: boolean }) {
+export function AccountUnavailable({
+  signUp,
+  localPreview = true,
+}: {
+  signUp: boolean;
+  localPreview?: boolean;
+}) {
   return (
     <AuthPage signUp={signUp}>
       <div className="account-message" role="status">
         <h2>Accounts are coming soon.</h2>
         <p>
-          Account access isn’t available in this preview yet. You can still
-          explore the local conversation experience.
+          {localPreview
+            ? "Account access isn’t available in this preview yet. You can still explore the local conversation experience."
+            : "Account access isn’t available yet. Please try again later."}
         </p>
-        <a href="/app" className="button-link">
-          Explore PODU
-        </a>
+        {localPreview && (
+          <a href="/app" className="button-link">
+            Explore PODU
+          </a>
+        )}
         <a href="/welcome" className="quiet-link">
           Back to the welcome page
         </a>

@@ -104,6 +104,15 @@ describe("auditAgents", () => {
     mockFetch.mockRestore();
   });
 
+  it("understands v4 Turbo and the current string LLM configuration", async () => {
+    const mockFetch = mockFetchWithConfig(makeMockAgentConfig({ tts: { model_id: "eleven_v4_turbo" }, prompt: { llm: "gemini-2.5-flash-lite", tools: [{ type: "system", name: "end_call", params: { system_tool_type: "end_call" } }] } }));
+    const report = await auditAgents();
+    expect(report.summary.withIssues).toBe(0);
+    expect(report.results[0]!.llmModel).toBe("gemini-2.5-flash-lite");
+    expect(report.results[0]!.hasDeprecatedTools).toBe(false);
+    mockFetch.mockRestore();
+  });
+
   it("handles API errors gracefully", async () => {
     const mockFetch = spyOn(globalThis, "fetch").mockImplementation(
       fetchStub(() =>

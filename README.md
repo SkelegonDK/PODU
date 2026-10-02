@@ -10,17 +10,21 @@ Three conversation modes with distinct personalities:
 - **Educational** — Clear explanations that build genuine understanding
 - **Deep** — Philosophical exploration that challenges assumptions
 
-Runs locally with nothing but an ElevenLabs API key and three agent IDs. Your ElevenLabs API key is entered in Settings and stored server-side. Clerk accounts are optional: add a publishable key to enable the welcome, sign-up, sign-in, and account-management flows. Clone, set env vars, `bun dev`.
+PODU now uses **Clerk + Convex** for accounts and durable conversations, and **Eleven v4 Turbo** through ElevenAgents for interruptible voice conversations with a lead host and cohost. Topic memory updates run in the background. Users can view transcripts, continue earlier conversations, and opt into saving audio for replay.
 
-> Looking for Convex storage and billing? See the [`full-version`](../../tree/full-version) branch.
+See [backend upgrade and deployment notes](docs/backend-upgrade.md) for setup, verified changes, remaining live integration, memory settings, and recording access control. The `full-version` branch preserves the older SaaS implementation; the current branch restores the integrations with account-scoped access.
 
 ## Tech Stack
 
-| Layer    | Technology                                                     |
-| -------- | -------------------------------------------------------------- |
-| Runtime  | [Bun](https://bun.sh)                                          |
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Shadcn/UI                |
-| Voice AI | [ElevenLabs](https://elevenlabs.io) Conversational AI (WebRTC) |
+| Layer          | Technology                                      |
+| -------------- | ----------------------------------------------- |
+| Runtime        | [Bun](https://bun.sh)                           |
+| Frontend       | React 19, TypeScript, Tailwind CSS 4, Shadcn/UI |
+| Voice AI       | ElevenAgents, Eleven v4 Turbo, WebRTC           |
+| Authentication | Clerk                                           |
+| Persistence    | Convex database + file storage                  |
+
+See `convex/` for the authenticated document/conversation functions, memory worker, recording worker, and webhook endpoint.
 
 ## Prerequisites
 
@@ -41,7 +45,17 @@ bun install
 
 Create three conversational AI agents in the [ElevenLabs dashboard](https://elevenlabs.io/app/conversational-ai). Each agent corresponds to a conversation mode (fun, educational, deep). Copy the system prompts from [`src/api/agentPrompts.ts`](src/api/agentPrompts.ts) into each agent's configuration, then note down the agent IDs.
 
-### 3. Configure environment variables
+### 3. Configure Clerk and Convex
+
+Use your Clerk app's `convex` JWT template. Configure the Clerk credentials, issuer URL, and Convex URL from `.env.example`. Set the issuer, ElevenLabs API key, and three agent IDs in the Convex environment too. Deploy the development backend:
+
+```bash
+bunx convex dev --once
+```
+
+For final transcripts and saved audio, configure an ElevenLabs signed post-call transcription webhook at `<CONVEX_SITE_URL>/webhooks/elevenlabs` and set `ELEVENLABS_WEBHOOK_SECRET` in Convex. See the [deployment notes](docs/backend-upgrade.md) for the separate memory summarizer and remaining production work.
+
+### 4. Configure environment variables
 
 ```bash
 cp .env.example .env
@@ -56,34 +70,36 @@ ELEVENLABS_AGENT_ID_EDU=agent_...
 ELEVENLABS_AGENT_ID_DEEP=agent_...
 ```
 
-The API key is optional here — you can also enter it in the app's Settings panel after starting the server. It's sealed server-side into an httpOnly cookie and never exposed to the browser bundle.
+SaaS mode uses a server-managed key in Convex. The optional local demo supports entering a personal key in Settings, stored in an encrypted HttpOnly cookie.
 
-### 4. Run the dev server
+### 5. Run the dev server
 
 ```bash
 bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000), pick your topics and mode, and start a conversation.
+Open [http://localhost:3000](http://localhost:3000), sign in, pick your topics and mode, and start a conversation. For an explicit localhost-only demo without Clerk/Convex, use `bun run dev:local`.
 
-## Clerk accounts
+## Account and welcome pages
 
-Set `BUN_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...` in `.env.local` to enable accounts with your existing Clerk development instance. Restart `bun dev` after changing it. The frontend includes only this publishable key; keep `CLERK_SECRET_KEY` server-side.
+Signed-out visitors see the PODU welcome page. `/sign-up` and `/sign-in` use branded Clerk forms with Uncut Sans and the supplied slate, blue, pale sky, ghost white, and coral palette. Signed-in users enter the workspace with account controls, saved conversations, and recording opt-in. `/welcome` is always public.
 
-With Clerk enabled, signed-out visitors see the welcome page, `/sign-up` and `/sign-in` use branded Clerk forms, and signed-in users enter the conversation workspace with profile and sign-out controls. `/welcome` is also available for previewing the public page. Without a publishable key, `/` and `/app` keep working as the local app.
-
-The frontend sends a fresh Clerk bearer token with each API request. **The current local server does not validate these tokens or isolate users' documents.** Coordinate server authentication and user-owned storage before launching publicly. See [frontend readiness and backend handoff](FRONTEND_READINESS.md).
+The frontend uses the server’s public configuration and requests Clerk’s `convex` JWT template for authenticated API calls. `BUN_PUBLIC_CLERK_PUBLISHABLE_KEY` is supported as an alias for `CLERK_PUBLISHABLE_KEY`. Local mode must be explicitly enabled with `bun run dev:local`; missing SaaS credentials do not bypass authentication. See [frontend readiness](FRONTEND_READINESS.md) for validation and remaining live checks.
 
 ## Scripts
 
-| Command                | Description                               |
-| ---------------------- | ----------------------------------------- |
-| `bun dev`              | Start dev server with hot reload          |
-| `bun start`            | Start production server                   |
-| `bun run build`        | Build for production (outputs to `dist/`) |
-| `bun test`             | Run unit tests                            |
-| `bun run test:e2e`     | Run Playwright end-to-end tests           |
-| `bun run audit:agents` | Validate ElevenLabs agent configuration   |
+| Command                  | Description                                                |
+| ------------------------ | ---------------------------------------------------------- |
+| `bun dev`                | Start dev server with hot reload                           |
+| `bun run dev:local`      | Start localhost-only SQLite demo                           |
+| `bun start`              | Start production server                                    |
+| `bun run build`          | Build for production (outputs to `dist/`)                  |
+| `bun test`               | Run unit tests                                             |
+| `bun run test:backend`   | Test Convex ownership, transcripts, and webhook completion |
+| `bun run typecheck`      | Check TypeScript                                           |
+| `bun run upgrade:agents` | Preview agent updates (`--apply` to apply)                 |
+| `bun run test:e2e`       | Run Playwright end-to-end tests                            |
+| `bun run audit:agents`   | Validate ElevenLabs agent configuration                    |
 
 ## Project Structure
 
@@ -95,11 +111,12 @@ src/
   api/
     agents.ts           # Agent resolution + conversation tokens
     agentPrompts.ts     # System prompts for each conversation mode
-    knowledgebase.ts    # Document store for context injection (SQLite-backed)
+    knowledgebase.ts    # File parsing and local demo document store
+    podcastProfile.ts   # v4 Turbo two-host agent profile
     auditAgents.ts      # ElevenLabs agent configuration validator
   components/
     WelcomePage.tsx     # Public introduction and account entry points
-    ClerkApp.tsx        # Clerk account pages, session handling, profile controls
+    ClerkApp.tsx        # Branded Clerk flows, session handling, Convex provider
     LandingPage.tsx     # Main app view (topic + mode selection)
     ConversationView.tsx # Active conversation UI with waveform
     SubjectSelector.tsx # Topic picker (1-3 topics)
@@ -110,15 +127,17 @@ src/
   lib/
     db.ts               # bun:sqlite singleton (lazy, hot-reload safe)
     session.ts          # iron-session sealed-cookie API key storage
-    poduApi.ts          # Typed client-side API seam
+    poduApi.ts          # Typed, authenticated client-side API seam
 ```
 
 ## How It Works
 
-1. The Bun server transpiles the React frontend at request time
-2. User selects 1-3 topics and a conversation mode, then hits play
-3. The server resolves the mode to an ElevenLabs agent ID, builds a system prompt with topic constraints and any uploaded knowledge-base context, and returns a conversation token
-4. The frontend establishes a WebRTC connection to the ElevenLabs agent for real-time voice
+1. Clerk signs the user in; Convex verifies the same identity for all data access.
+2. The user selects 1–3 topics, a mode, and whether to save a replay.
+3. Bun loads their documents and relevant topic memory; Convex reserves an authenticated ElevenLabs session token.
+4. The browser connects to ElevenAgents over WebRTC; voice switching uses a configured cohost and v4 audio tags.
+5. Transcript batches and topic compaction run separately from voice responses. A signed provider webhook finalizes the transcript and schedules recording archival.
+6. History supports transcripts, replay, topic continuation, and archive deletion.
 
 ## License
 

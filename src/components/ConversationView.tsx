@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
-import { useConversation } from "@elevenlabs/react";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
+import { TranscriptQueue } from "../lib/transcriptQueue";
 import {
   describeException,
   failureCopyFromApiError,
@@ -11,6 +12,7 @@ import type { ConversationMode } from "./ModeSelector";
 import { X, Volume2, VolumeX, Mic, MicOff, AlertCircle } from "lucide-react";
 
 interface ConversationViewProps {
+  conversationId?: string;
   mode: ConversationMode;
   agentId: string;
   systemPrompt: string;
@@ -20,7 +22,16 @@ interface ConversationViewProps {
 }
 const modeNames = { fun: "FUN", edu: "EDU", deep: "DEEP" };
 
-export function ConversationView({
+export function ConversationView(props: ConversationViewProps) {
+  return (
+    <ConversationProvider>
+      <ActiveConversation {...props} />
+    </ConversationProvider>
+  );
+}
+
+function ActiveConversation({
+  conversationId,
   mode,
   agentId,
   systemPrompt,
@@ -32,12 +43,44 @@ export function ConversationView({
   const [micMuted, setMicMuted] = useState(false);
   const [pending, setPending] = useState(false);
   const [startFailure, setStartFailure] = useState<FailureCopy | null>(null);
+  const [saveFailure, setSaveFailure] = useState(false);
+  const [hasEnded, setHasEnded] = useState(false);
   const [transcript, setTranscript] = useState<
-    { source: string; text: string }[]
+    { eventId: string; source: string; text: string }[]
   >([]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
   const starting = useRef(false);
+  const queueRef = useRef<TranscriptQueue | null>(null);
+  const memoryRevision = useRef(0);
+  const connectedAt = useRef<number | null>(null);
+  const lastTranscriptAt = useRef<number | null>(null);
+  const finishing = useRef<Promise<void> | null>(null);
+  if (!queueRef.current && conversationId)
+    queueRef.current = new TranscriptQueue((turns) =>
+      poduApi.saveTurns(conversationId, turns),
+    );
+  const save = useCallback(async () => {
+    const ok = await queueRef.current?.flush();
+    if (mounted.current && ok !== undefined) setSaveFailure(!ok);
+    return ok !== false;
+  }, []);
+  const finish = useCallback(() => {
+    if (finishing.current) return finishing.current;
+    finishing.current = (async () => {
+      const saved = await save();
+      if (conversationId && connectedAt.current !== null) {
+        const result = await poduApi.endConversation(conversationId);
+        if (mounted.current) {
+          setSaveFailure(!saved || !result.ok);
+          setHasEnded(true);
+        }
+      }
+    })().finally(() => {
+      finishing.current = null;
+    });
+    return finishing.current;
+  }, [save, conversationId]);
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(
     null,
   );
@@ -46,11 +89,50 @@ export function ConversationView({
     micMuted,
     volume: isMuted ? 0 : 1,
     onConnect: () => {
+      connectedAt.current = performance.now();
       if (mounted.current) setStartFailure(null);
     },
-    onMessage: ({ message, source }) => {
+    onDisconnect: () => {
+      void finish();
+    },
+    onMessage: ({ message, role, event_id }) => {
+      if (role === "user") lastTranscriptAt.current = performance.now();
+      if (typeof message !== "string") return;
+      const eventId = `${role}:${event_id}`;
+      queueRef.current?.push({ eventId, role, message });
       if (mounted.current)
-        setTranscript((previous) => [...previous, { source, text: message }]);
+        setTranscript((previous) => [
+          ...previous,
+          { eventId, source: role, text: message },
+        ]);
+    },
+    onAgentResponseCorrection: (event) => {
+      const eventId = `agent:${event.event_id}`;
+      queueRef.current?.push({
+        eventId,
+        role: "agent",
+        message: event.corrected_agent_response,
+      });
+      if (mounted.current)
+        setTranscript((previous) =>
+          previous.map((line) =>
+            line.eventId === eventId
+              ? { ...line, text: event.corrected_agent_response }
+              : line,
+          ),
+        );
+    },
+    onModeChange: ({ mode }) => {
+      if (mode === "speaking" && lastTranscriptAt.current !== null) {
+        performance.measure("podu-transcript-to-speech", {
+          start: lastTranscriptAt.current,
+          end: performance.now(),
+        });
+        lastTranscriptAt.current = null;
+      }
+    },
+    onInterruption: () => {
+      lastTranscriptAt.current = null;
     },
     onError: (error: unknown) => {
       if (mounted.current)
@@ -63,11 +145,46 @@ export function ConversationView({
   useEffect(() => {
     mounted.current = true;
     headingRef.current?.focus();
+    const timer = window.setInterval(() => {
+      void save();
+    }, 2500);
+    const pageHide = () => {
+      void finish();
+    };
+    window.addEventListener("pagehide", pageHide);
     return () => {
       mounted.current = false;
-      void conversationRef.current?.endSession().catch(() => {});
+      window.clearInterval(timer);
+      window.removeEventListener("pagehide", pageHide);
+      conversationRef.current?.endSession();
+      void finish();
     };
-  }, []);
+  }, [finish, save]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const timer = window.setInterval(async () => {
+      if (
+        conversationRef.current?.status !== "connected" ||
+        conversationRef.current.isSpeaking
+      )
+        return;
+      const result = await poduApi.getMemory(conversationId);
+      if (
+        mounted.current &&
+        result.ok &&
+        result.data.revision > memoryRevision.current &&
+        result.data.context &&
+        conversationRef.current?.status === "connected"
+      ) {
+        memoryRevision.current = result.data.revision;
+        conversationRef.current.sendContextualUpdate(result.data.context, {
+          contextId: "podu-topic-memory",
+        });
+      }
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [conversationId]);
 
   const startConversation = async () => {
     if (starting.current || status === "connecting") return;
@@ -80,7 +197,10 @@ export function ConversationView({
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach((track) => track.stop());
       if (!mounted.current) return;
-      const tokenResult = await poduApi.getConversationToken(agentId);
+      const tokenResult = await poduApi.getConversationToken(
+        agentId,
+        conversationId,
+      );
       if (!mounted.current) return;
       if (!tokenResult.ok) {
         setStartFailure(
@@ -106,6 +226,10 @@ export function ConversationView({
   };
 
   const toggleConversation = async () => {
+    if (hasEnded) {
+      onClose();
+      return;
+    }
     if (status !== "connected") {
       await startConversation();
       return;
@@ -113,6 +237,7 @@ export function ConversationView({
     setPending(true);
     try {
       await conversation.endSession();
+      await finish();
     } catch (error) {
       setStartFailure(describeException(error, "conversation"));
     } finally {
@@ -159,8 +284,25 @@ export function ConversationView({
             : "Your conversation is ready."}
         </h1>
         <p className="conversation-status" role="status">
-          {statusText}
+          {hasEnded ? "Conversation ended" : statusText}
         </p>
+        {saveFailure && (
+          <p role="status" className="conversation-help">
+            Transcript sync is delayed. We’ll keep trying.{" "}
+            <button
+              type="button"
+              className="quiet-link"
+              onClick={() => void finish()}
+            >
+              Retry sync
+            </button>
+          </p>
+        )}
+        {hasEnded && (
+          <button type="button" className="quiet-link" onClick={onClose}>
+            Back to topics and saved conversations
+          </button>
+        )}
         {startFailure && (
           <div role="alert" className="conversation-error">
             <AlertCircle size={20} aria-hidden="true" />
@@ -198,13 +340,15 @@ export function ConversationView({
             ))}
           </div>
         </div>
-        <PlayButton
-          mode={mode}
-          isLoading={connecting}
-          isActive={status === "connected"}
-          onClick={() => void toggleConversation()}
-          describedBy="conversation-help"
-        />
+        {!hasEnded && (
+          <PlayButton
+            mode={mode}
+            isLoading={connecting}
+            isActive={status === "connected"}
+            onClick={() => void toggleConversation()}
+            describedBy="conversation-help"
+          />
+        )}
         <p id="conversation-help" className="conversation-help">
           {status === "connected"
             ? "Take your time. You can interrupt or ask a follow-up."
@@ -230,7 +374,9 @@ export function ConversationView({
             )}
           </div>
           <p className="transcript-note">
-            This transcript stays here until you leave the conversation.
+            {conversationId
+              ? "Your transcript is saved to your account."
+              : "This transcript stays here until you leave the conversation."}
           </p>
         </details>
       </main>

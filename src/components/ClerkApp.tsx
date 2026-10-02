@@ -11,10 +11,17 @@ import {
   useUser,
 } from "@clerk/react";
 import { shadcn } from "@clerk/ui/themes";
+import { ConvexProviderWithClerk } from "convex/react-clerk";
+import { ConvexReactClient } from "convex/react";
+import { clientConfig } from "../shared/publicConfig";
 import { AuthPage } from "./AuthPage";
 import { WelcomePage } from "./WelcomePage";
 import { LandingPage } from "./LandingPage";
 import { configureAccessToken } from "@/lib/poduApi";
+
+const convex = clientConfig.convexUrl
+  ? new ConvexReactClient(clientConfig.convexUrl)
+  : null;
 
 const appearance = {
   theme: shadcn,
@@ -110,7 +117,8 @@ function ClerkRoutes() {
   const signUp = path.startsWith("/sign-up");
   const isAuthPage = signUp || path.startsWith("/sign-in");
   useLayoutEffect(() => {
-    if (isSignedIn) return configureAccessToken(() => getToken());
+    if (isSignedIn)
+      return configureAccessToken(() => getToken({ template: "convex" }));
   }, [isSignedIn, getToken]);
   useEffect(() => {
     if (isSignedIn && isAuthPage) window.location.replace("/");
@@ -168,7 +176,13 @@ export function ClerkApp({ publishableKey }: { publishableKey: string }) {
         <AccountFailure />
       </ClerkFailed>
       <ClerkLoaded>
-        <ClerkRoutes />
+        {convex ? (
+          <ConvexProviderWithClerk client={convex} useAuth={useAuth}>
+            <ClerkRoutes />
+          </ConvexProviderWithClerk>
+        ) : (
+          <ClerkRoutes />
+        )}
       </ClerkLoaded>
     </ClerkProvider>
   );

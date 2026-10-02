@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import {
   mockConfigApi,
+  mockAgentsApi,
   mockConversationTokenApi,
   mockDocumentsDeleteApi,
   setupApiMocks,
@@ -115,6 +116,17 @@ test("permission-check microphone tracks stop when token retrieval fails", async
   page,
 }) => {
   await setupApiMocks(page, { agentsDelay: 0 });
+  await mockAgentsApi(page, {
+    body: {
+      agentId: "test-agent-123",
+      conversationId: "saved-conversation",
+      systemPrompt: "Explore ideas.",
+      firstMessage: "Welcome.",
+    },
+  });
+  const tokenRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname.endsWith("/conversation-token"),
+  );
   await mockConversationTokenApi(page, {
     status: 503,
     body: { error: "Please try again", code: "upstream_error" },
@@ -146,6 +158,9 @@ test("permission-check microphone tracks stop when token retrieval fails", async
   await expect(page.getByTestId("conversation-mode-badge")).toBeVisible();
   await page.getByTestId("play-button").click();
   await expect(page.getByRole("alert")).toContainText("Please try again");
+  expect(
+    new URL((await tokenRequest).url()).searchParams.get("conversationId"),
+  ).toBe("saved-conversation");
   expect(
     await page.evaluate(
       () =>

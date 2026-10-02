@@ -1,4 +1,5 @@
 import { ConfigError } from "../api/agents";
+import { authorize, HttpError } from "./backend";
 
 /**
  * Maps a ConfigError's code to the HTTP status the client should see.
@@ -30,12 +31,14 @@ type RouteHandler<Path extends string> = (
  * e.g. route("get document", ...) logs "Failed to get document: <err>" and
  * responds with { error: "Failed to get document" } on unknown failures.
  */
-export function route<Path extends string>(label: string, handler: RouteHandler<Path>) {
+export function route<Path extends string>(label: string, handler: RouteHandler<Path>, options: { public?: boolean } = {}) {
   return async (req: Bun.BunRequest<Path>): Promise<Response> => {
     try {
+      if (!options.public) await authorize(req);
       const result = await handler(req);
       return result instanceof Response ? result : Response.json(result);
     } catch (error) {
+      if (error instanceof HttpError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
       if (error instanceof ConfigError) return configErrorResponse(error);
       console.error(`Failed to ${label}:`, error);
       return Response.json({ error: `Failed to ${label}` }, { status: 500 });

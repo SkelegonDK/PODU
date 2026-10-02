@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import plugin from "bun-plugin-tailwind";
+import { publicConfig } from "./src/lib/backend";
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
 import path from "path";
@@ -138,12 +139,15 @@ const result = await Bun.build({
   sourcemap: "linked",
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
-    "process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY": JSON.stringify(
-      process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
-    ),
+    __PODU_PUBLIC_CONFIG__: JSON.stringify(publicConfig()),
   },
   ...cliConfig,
 });
+
+if (!result.success) {
+  console.error(result.logs);
+  process.exit(1);
+}
 
 const end = performance.now();
 
