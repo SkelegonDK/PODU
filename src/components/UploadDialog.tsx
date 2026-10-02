@@ -8,7 +8,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import { Button } from "./ui/button";
 import * as poduApi from "@/lib/poduApi";
 
 interface UploadedDocument {
@@ -16,6 +15,7 @@ interface UploadedDocument {
   name: string;
   size: number;
   status: "uploading" | "success" | "error";
+  serverId?: string;
   /**
    * The server's explanation for this specific file, when it sent one (e.g.
    * "notes.pdf: only .txt and .md files are supported.", or why a delete was
@@ -86,7 +86,7 @@ export function UploadDialog({
           const updated = prev.map((d) =>
             d.id === doc.id
               ? { ...d, status: "error" as const, errorMessage: serverMessage }
-              : d
+              : d,
           );
           onDocumentsChange?.(updated);
           return updated;
@@ -97,8 +97,13 @@ export function UploadDialog({
       setDocuments((prev) => {
         const updated = prev.map((d) =>
           d.id === doc.id
-            ? { ...d, id: result.data.id, status: "success" as const }
-            : d
+            ? {
+                ...d,
+                id: result.data.id,
+                serverId: result.data.id,
+                status: "success" as const,
+              }
+            : d,
         );
         onDocumentsChange?.(updated);
         return updated;
@@ -120,7 +125,7 @@ export function UploadDialog({
 
     // Only a successful upload has a server-side id worth deleting. A row
     // still uploading, or one whose upload failed, exists on this client only.
-    if (doc.status !== "success") return;
+    if (!doc.serverId && doc.status !== "success") return;
 
     const result = await poduApi.deleteDocument(id);
     // 404 means the row is already gone server-side, so the optimistic removal
@@ -172,6 +177,15 @@ export function UploadDialog({
         <div className="space-y-4">
           {/* Upload zone */}
           <div
+            role="button"
+            tabIndex={0}
+            aria-label="Choose documents to upload"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                fileInputRef.current?.click();
+              }
+            }}
             onClick={() => fileInputRef.current?.click()}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
@@ -183,24 +197,28 @@ export function UploadDialog({
               "transition-all duration-300",
               isDragging
                 ? "border-primary bg-primary/10 scale-[1.02]"
-                : "border-border/50 bg-card/30 hover:border-border hover:bg-card/50"
+                : "border-border/50 bg-card/30 hover:border-border hover:bg-card/50",
             )}
           >
             <input
               ref={fileInputRef}
               type="file"
+              aria-label="Upload TXT or MD documents"
               multiple
               accept=".txt,.md"
               className="hidden"
-              onChange={(e) => handleFiles(e.target.files)}
+              onChange={(e) => {
+                void handleFiles(e.target.files);
+                e.target.value = "";
+              }}
             />
 
             <div
               className={cn(
                 "p-4 rounded-full",
-                "bg-linear-to-br from-primary/20 to-accent/20",
+                "bg-primary/10",
                 "transition-transform duration-300",
-                isDragging && "scale-110"
+                isDragging && "scale-110",
               )}
             >
               <Upload className="w-8 h-8 text-primary" />
@@ -210,7 +228,7 @@ export function UploadDialog({
               <p className="font-display font-medium text-sm text-foreground/90">
                 Drop files or tap to upload
               </p>
-              <p className="font-mono text-xs text-muted-foreground mt-1">
+              <p className="font-mono text-sm text-muted-foreground mt-1">
                 TXT, MD supported
               </p>
             </div>
@@ -219,22 +237,30 @@ export function UploadDialog({
           {/* Uploaded files list */}
           {documents.length > 0 && (
             <div className="space-y-2 max-h-64 overflow-y-auto">
+              <p role="status" className="sr-only">
+                {documents.filter((doc) => doc.status === "uploading").length}{" "}
+                uploading,{" "}
+                {documents.filter((doc) => doc.status === "success").length}{" "}
+                uploaded,{" "}
+                {documents.filter((doc) => doc.status === "error").length} with
+                errors.
+              </p>
               {documents.map((doc) => (
                 <div
                   key={doc.id}
                   className={cn(
                     "flex items-center gap-3 p-2.5 rounded-lg",
-                    "bg-card/50 border border-border/50"
+                    "bg-card/50 border border-border/50",
                   )}
                 >
                   <div
                     className={cn(
                       "p-1.5 rounded-md",
                       doc.status === "success"
-                        ? "bg-green-500/20 text-green-500"
+                        ? "bg-primary/20 text-primary"
                         : doc.status === "error"
-                        ? "bg-destructive/20 text-destructive"
-                        : "bg-primary/20 text-primary"
+                          ? "bg-destructive/20 text-destructive"
+                          : "bg-primary/20 text-primary",
                     )}
                   >
                     {doc.status === "uploading" ? (
@@ -247,12 +273,12 @@ export function UploadDialog({
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p className="font-mono text-xs text-foreground truncate">
+                    <p className="font-mono text-sm text-foreground truncate">
                       {doc.name}
                     </p>
-                    <p className="font-mono text-[10px] text-muted-foreground">
+                    <p className="font-mono text-sm text-muted-foreground">
                       {doc.status === "error"
-                        ? doc.errorMessage ?? "Upload failed"
+                        ? (doc.errorMessage ?? "Upload failed")
                         : formatFileSize(doc.size)}
                     </p>
                   </div>
@@ -262,11 +288,12 @@ export function UploadDialog({
                       e.stopPropagation();
                       removeDocument(doc.id);
                     }}
+                    disabled={doc.status === "uploading"}
                     aria-label={`Remove ${doc.name}`}
                     className={cn(
-                      "p-1 rounded-md",
+                      "min-w-11 min-h-11 flex items-center justify-center rounded-md disabled:opacity-40",
                       "text-muted-foreground hover:text-destructive",
-                      "hover:bg-destructive/10 transition-colors"
+                      "hover:bg-destructive/10 transition-colors",
                     )}
                   >
                     <X className="w-4 h-4" />

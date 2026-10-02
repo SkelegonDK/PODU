@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useConversation } from "@elevenlabs/react";
-import { cn } from "@/lib/utils";
 import {
   describeException,
   failureCopyFromApiError,
@@ -9,7 +8,7 @@ import {
 import * as poduApi from "@/lib/poduApi";
 import { PlayButton } from "./PlayButton";
 import type { ConversationMode } from "./ModeSelector";
-import { X, Volume2, VolumeX, Mic, AlertCircle } from "lucide-react";
+import { X, Volume2, VolumeX, Mic, MicOff, AlertCircle } from "lucide-react";
 
 interface ConversationViewProps {
   mode: ConversationMode;
@@ -19,33 +18,7 @@ interface ConversationViewProps {
   subjectCount: number;
   onClose: () => void;
 }
-
-const modeStyles = {
-  fun: {
-    gradient: "from-pink-400/20 via-pink-500/20 to-rose-500/20",
-    border: "border-pink-500/30",
-    text: "text-pink-400",
-    bg: "bg-pink-500",
-  },
-  edu: {
-    gradient: "from-sky-400/20 via-blue-500/20 to-blue-600/20",
-    border: "border-blue-500/30",
-    text: "text-blue-400",
-    bg: "bg-blue-500",
-  },
-  deep: {
-    gradient: "from-purple-400/20 via-purple-500/20 to-violet-600/20",
-    border: "border-purple-500/30",
-    text: "text-purple-400",
-    bg: "bg-purple-500",
-  },
-};
-
-const modeNames = {
-  fun: "FUN",
-  edu: "EDU",
-  deep: "DEEP",
-};
+const modeNames = { fun: "FUN", edu: "EDU", deep: "DEEP" };
 
 export function ConversationView({
   mode,
@@ -56,271 +29,241 @@ export function ConversationView({
   onClose,
 }: ConversationViewProps) {
   const [isMuted, setIsMuted] = useState(false);
-  const [volume, setVolume] = useState(1);
-  // Holds mapped copy, never a raw string, so a rendered message can't be fed
-  // back into a mapper.
+  const [micMuted, setMicMuted] = useState(false);
+  const [pending, setPending] = useState(false);
   const [startFailure, setStartFailure] = useState<FailureCopy | null>(null);
-  const styles = modeStyles[mode];
-  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
+  const [transcript, setTranscript] = useState<
+    { source: string; text: string }[]
+  >([]);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const mounted = useRef(false);
+  const starting = useRef(false);
+  const conversationRef = useRef<ReturnType<typeof useConversation> | null>(
+    null,
+  );
 
   const conversation = useConversation({
+    micMuted,
+    volume: isMuted ? 0 : 1,
     onConnect: () => {
-      setStartFailure(null);
+      if (mounted.current) setStartFailure(null);
     },
-    onDisconnect: () => {},
-    onMessage: () => {},
+    onMessage: ({ message, source }) => {
+      if (mounted.current)
+        setTranscript((previous) => [...previous, { source, text: message }]);
+    },
     onError: (error: unknown) => {
-      setStartFailure(describeException(error, "conversation"));
+      if (mounted.current)
+        setStartFailure(describeException(error, "conversation"));
     },
   });
-
-  // Keep ref in sync for cleanup
   conversationRef.current = conversation;
-
   const { status, isSpeaking } = conversation;
 
-  const startConversation = useCallback(async () => {
-    setStartFailure(null);
-
-    // Request microphone permission
-    try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (micError) {
-      setStartFailure(describeException(micError, "conversation"));
-      return;
-    }
-
-    // Fetch conversation token for WebRTC. poduApi resolves with an ApiError
-    // instead of throwing, so the server's failure is mapped here and nowhere
-    // else, and the resulting copy is stored as-is — it never reaches
-    // describeException(), which stays reserved for thrown values.
-    const tokenResult = await poduApi.getConversationToken(agentId);
-    if (!tokenResult.ok) {
-      setStartFailure(failureCopyFromApiError(tokenResult.error, "conversation", { mode }));
-      return;
-    }
-    const { token } = tokenResult.data;
-
-    // Start the conversation with server-built prompt
-    try {
-      await conversation.startSession({
-        conversationToken: token,
-        connectionType: "webrtc",
-        overrides: {
-          agent: {
-            prompt: {
-              prompt: systemPrompt,
-            },
-            firstMessage,
-          },
-        },
-      });
-    } catch (error) {
-      setStartFailure(describeException(error, "conversation"));
-    }
-  }, [conversation, agentId, mode, systemPrompt, firstMessage]);
-
-  const stopConversation = useCallback(async () => {
-    await conversation.endSession();
-  }, [conversation]);
-
-  const toggleConversation = () => {
-    if (status === "connected") {
-      stopConversation();
-    } else {
-      startConversation();
-    }
-  };
-
-  const toggleMute = () => {
-    const newMuted = !isMuted;
-    setIsMuted(newMuted);
-    setVolume(newMuted ? 0 : 1);
-    conversation.setVolume({ volume: newMuted ? 0 : 1 });
-  };
-
-  // Cleanup on unmount using ref to avoid stale closure
   useEffect(() => {
+    mounted.current = true;
+    headingRef.current?.focus();
     return () => {
-      conversationRef.current?.endSession();
+      mounted.current = false;
+      void conversationRef.current?.endSession().catch(() => {});
     };
   }, []);
 
+  const startConversation = async () => {
+    if (starting.current || status === "connecting") return;
+    starting.current = true;
+    setPending(true);
+    setStartFailure(null);
+    try {
+      // This permission-check stream is separate from the SDK's own stream.
+      // Release it immediately, including when the user leaves while granting access.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach((track) => track.stop());
+      if (!mounted.current) return;
+      const tokenResult = await poduApi.getConversationToken(agentId);
+      if (!mounted.current) return;
+      if (!tokenResult.ok) {
+        setStartFailure(
+          failureCopyFromApiError(tokenResult.error, "conversation", { mode }),
+        );
+        return;
+      }
+      await conversation.startSession({
+        conversationToken: tokenResult.data.token,
+        connectionType: "webrtc",
+        overrides: {
+          agent: { prompt: { prompt: systemPrompt }, firstMessage },
+        },
+      });
+      if (!mounted.current) await conversation.endSession();
+    } catch (error) {
+      if (mounted.current)
+        setStartFailure(describeException(error, "conversation"));
+    } finally {
+      starting.current = false;
+      if (mounted.current) setPending(false);
+    }
+  };
+
+  const toggleConversation = async () => {
+    if (status !== "connected") {
+      await startConversation();
+      return;
+    }
+    setPending(true);
+    try {
+      await conversation.endSession();
+    } catch (error) {
+      setStartFailure(describeException(error, "conversation"));
+    } finally {
+      if (mounted.current) setPending(false);
+    }
+  };
+  const connecting = pending || status === "connecting";
+  const statusText =
+    status === "connected"
+      ? isSpeaking
+        ? "Host is speaking..."
+        : micMuted
+          ? "Microphone muted"
+          : "Listening..."
+      : connecting
+        ? "Connecting..."
+        : "Ready to start";
+
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-background">
-      {/* Animated background */}
-      <div className={cn(
-        "absolute inset-0 bg-gradient-to-br opacity-50",
-        styles.gradient
-      )} />
-
-      {/* Animated circles background */}
-      <div className="absolute inset-0 overflow-hidden">
-        {[...Array(5)].map((_, i) => (
-          <div
-            key={i}
-            className={cn(
-              "absolute rounded-full blur-3xl opacity-20",
-              styles.bg,
-              "animate-float"
-            )}
-            style={{
-              width: `${150 + i * 50}px`,
-              height: `${150 + i * 50}px`,
-              left: `${10 + i * 20}%`,
-              top: `${20 + i * 15}%`,
-              animationDelay: `${i * 0.5}s`,
-              animationDuration: `${6 + i}s`,
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Header */}
-      <header className="relative z-10 flex items-center justify-between p-4">
-        <div className="flex items-center gap-3">
-          <div
-            data-testid="conversation-mode-badge"
-            className={cn(
-            "px-3 py-1 rounded-full text-xs font-bold font-mono",
-            styles.bg,
-            "text-white"
-          )}>
+    <div className="conversation-page">
+      <header className="conversation-header">
+        <div className="conversation-meta">
+          <span data-testid="conversation-mode-badge" className="mode-badge">
             {modeNames[mode]}
-          </div>
-          <span className="font-mono text-xs text-muted-foreground">
+          </span>
+          <span>
             {subjectCount} topic{subjectCount > 1 ? "s" : ""}
           </span>
         </div>
-
         <button
+          type="button"
           onClick={onClose}
-          className={cn(
-            "p-2 rounded-full",
-            "bg-card/50 border border-border/50",
-            "hover:bg-card transition-colors"
-          )}
+          className="icon-button"
+          aria-label="Leave conversation"
         >
-          <X className="w-5 h-5" />
+          <X size={20} aria-hidden="true" />
         </button>
       </header>
-
-      {/* Main content */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6">
-        {/* Error banner */}
+      <main className="conversation-main">
+        <p className="eyebrow">Room for a conversation</p>
+        <h1 ref={headingRef} tabIndex={-1}>
+          {status === "connected"
+            ? "A little space to explore."
+            : "Your conversation is ready."}
+        </h1>
+        <p className="conversation-status" role="status">
+          {statusText}
+        </p>
         {startFailure && (
-          <div
-            role="alert"
-            className={cn(
-              "mb-6 flex items-center gap-3 px-4 py-3 rounded-lg max-w-md w-full",
-              "bg-destructive/10 border border-destructive/30 text-destructive"
-            )}
-          >
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <p className="font-mono text-sm">{startFailure.message}</p>
+          <div role="alert" className="conversation-error">
+            <AlertCircle size={20} aria-hidden="true" />
+            <p>{startFailure.message}</p>
             <button
+              type="button"
+              className="icon-button"
               onClick={() => setStartFailure(null)}
-              className="ml-auto p-1 rounded hover:bg-destructive/20 transition-colors"
               aria-label="Dismiss error"
             >
-              <X className="w-4 h-4" />
+              <X size={18} aria-hidden="true" />
             </button>
+            {startFailure.action === "sign_in" && (
+              <a href="/sign-in" className="quiet-link">
+                Sign in again
+              </a>
+            )}
           </div>
         )}
-        {/* Status indicator */}
-        <div className={cn(
-          "mb-8 px-4 py-2 rounded-full",
-          "bg-card/50 backdrop-blur border",
-          styles.border
-        )}>
-          <div className="flex items-center gap-2">
-            <div className={cn(
-              "w-2 h-2 rounded-full",
-              status === "connected"
-                ? isSpeaking
-                  ? "bg-green-500 animate-pulse"
-                  : "bg-green-500"
-                : status === "connecting"
-                ? "bg-yellow-500 animate-pulse"
-                : "bg-muted-foreground"
-            )} />
-            <span className="font-mono text-xs text-foreground/80">
-              {status === "connected"
-                ? isSpeaking
-                  ? "Host is speaking..."
-                  : "Listening..."
-                : status === "connecting"
-                ? "Connecting..."
-                : "Ready to start"
-              }
-            </span>
-          </div>
-        </div>
-
-        {/* Play button */}
-        <PlayButton
-          mode={mode}
-          isLoading={status === "connecting"}
-          isActive={status === "connected"}
-          onClick={toggleConversation}
-        />
-
-        {/* Audio visualizer placeholder */}
-        {status === "connected" && (
-          <div className="mt-16 flex items-end justify-center gap-1 h-12">
-            {[...Array(20)].map((_, i) => (
-              <div
+        <div className="voice-orbit" aria-hidden="true">
+          <div className="voice-wave">
+            {[22, 38, 60, 82, 52, 96, 65, 42, 72, 45, 24].map((height, i) => (
+              <span
                 key={i}
-                className={cn(
-                  "w-1 rounded-full transition-all duration-150",
-                  styles.bg
-                )}
                 style={{
-                  height: isSpeaking
-                    ? `${Math.random() * 100}%`
-                    : "20%",
-                  opacity: isSpeaking ? 0.8 : 0.3,
-                  animationDelay: `${i * 50}ms`,
+                  height: status === "connected" ? height : 12,
+                  animationDelay: `${i * 90}ms`,
                 }}
+                className={
+                  status === "connected" && isSpeaking
+                    ? "voice-bar-speaking"
+                    : ""
+                }
               />
             ))}
           </div>
-        )}
-      </main>
-
-      {/* Footer controls */}
-      <footer className="relative z-10 p-6 pb-10">
-        <div className="flex items-center justify-center gap-4">
-          <button
-            onClick={toggleMute}
-            className={cn(
-              "p-3 rounded-full",
-              "bg-card/50 backdrop-blur border border-border/50",
-              "hover:bg-card transition-colors"
-            )}
+        </div>
+        <PlayButton
+          mode={mode}
+          isLoading={connecting}
+          isActive={status === "connected"}
+          onClick={() => void toggleConversation()}
+          describedBy="conversation-help"
+        />
+        <p id="conversation-help" className="conversation-help">
+          {status === "connected"
+            ? "Take your time. You can interrupt or ask a follow-up."
+            : "When you’re ready, allow microphone access and start talking."}
+        </p>
+        <details className="transcript">
+          <summary>Conversation transcript</summary>
+          <div
+            role="log"
+            aria-label="Conversation transcript"
+            aria-live="off"
+            tabIndex={0}
           >
-            {isMuted ? (
-              <VolumeX className="w-5 h-5 text-muted-foreground" />
+            {transcript.length === 0 ? (
+              <p>The words from your conversation will appear here.</p>
             ) : (
-              <Volume2 className="w-5 h-5" />
-            )}
-          </button>
-
-          <div className={cn(
-            "px-4 py-2 rounded-full",
-            "bg-card/50 backdrop-blur border border-border/50",
-            "font-mono text-xs text-muted-foreground"
-          )}>
-            {status === "connected" ? (
-              <span className="flex items-center gap-2">
-                <Mic className="w-3 h-3" />
-                Live
-              </span>
-            ) : (
-              "Tap play to begin"
+              transcript.map((line, i) => (
+                <p key={i}>
+                  <strong>{line.source === "user" ? "You" : "PODU"}</strong>
+                  <span>{line.text}</span>
+                </p>
+              ))
             )}
           </div>
-        </div>
+          <p className="transcript-note">
+            This transcript stays here until you leave the conversation.
+          </p>
+        </details>
+      </main>
+      <footer className="conversation-controls">
+        <button
+          type="button"
+          onClick={() => setMicMuted((value) => !value)}
+          disabled={status !== "connected"}
+          aria-pressed={micMuted}
+          aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+          className="audio-control"
+        >
+          {micMuted ? (
+            <MicOff size={18} aria-hidden="true" />
+          ) : (
+            <Mic size={18} aria-hidden="true" />
+          )}
+          <span>{micMuted ? "Mic off" : "Microphone"}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsMuted((value) => !value)}
+          aria-pressed={isMuted}
+          aria-label={isMuted ? "Unmute host audio" : "Mute host audio"}
+          className="audio-control"
+        >
+          {isMuted ? (
+            <VolumeX size={18} aria-hidden="true" />
+          ) : (
+            <Volume2 size={18} aria-hidden="true" />
+          )}
+          <span>{isMuted ? "Sound off" : "Sound on"}</span>
+        </button>
       </footer>
     </div>
   );

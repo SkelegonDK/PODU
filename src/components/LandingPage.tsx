@@ -1,13 +1,11 @@
-import { useState, useMemo, useEffect } from "react";
-import { cn } from "@/lib/utils";
+import { useState, useEffect, type ReactNode } from "react";
 import { SubjectSelector } from "./SubjectSelector";
 import { ModeSelector } from "./ModeSelector";
 import { PlayButton } from "./PlayButton";
 import { ConversationView } from "./ConversationView";
+import { Brand } from "./Brand";
 import { Button } from "./ui/button";
-import { AlertCircle, KeyRound, Settings2, WifiOff } from "lucide-react";
-import LightRays from "./LightRays";
-import Aurora from './Aurora';
+import { AlertCircle, Settings2, Mic } from "lucide-react";
 import { ApiKeySettings } from "./ApiKeySettings";
 import type { ConfigStatus, ConversationMode } from "@/shared/config";
 import * as poduApi from "@/lib/poduApi";
@@ -20,94 +18,17 @@ import {
   type FailureCopy,
 } from "@/lib/failureCopy";
 
-/**
- * SSR-safe hook to detect prefers-reduced-motion media query.
- * Returns true if the user prefers reduced motion or if we're on the server.
- * Defaults to false (full motion) on initial client render, then updates.
- */
-function usePrefersReducedMotion(): boolean {
-  // Default to false (full motion) to avoid hydration mismatch
-  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
-
-  useEffect(() => {
-    // Check if window is available (client-side only)
-    if (typeof window === "undefined") return;
-
-    const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-
-    // Set initial value
-    setPrefersReducedMotion(mediaQuery.matches);
-
-    // Listen for changes
-    const handleChange = (event: MediaQueryListEvent) => {
-      setPrefersReducedMotion(event.matches);
-    };
-
-    // Modern browsers
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener("change", handleChange);
-      return () => mediaQuery.removeEventListener("change", handleChange);
-    } else {
-      // Legacy browsers (Safari < 14)
-      mediaQuery.addListener(handleChange);
-      return () => mediaQuery.removeListener(handleChange);
-    }
-  }, []);
-
-  return prefersReducedMotion;
-}
-
-const getModeColor = (mode: ConversationMode): string => {
-  switch (mode) {
-    case "fun":
-      return "#F15BB5"; // pink
-    case "edu":
-      return "#00BBF9"; // blue
-    case "deep":
-      return "#9B5DE5"; // purple
-    default:
-      return "#00F5D4"; // mint
-  }
-};
-
-// Map subject IDs to hex colors (using the "from" color from gradient)
-const getSubjectColor = (subjectId: string): string => {
-  const colorMap: Record<string, string> = {
-    tech: "#00BBF9", // blue
-    science: "#22c55e", // green-500
-    history: "#FEE440", // yellow
-    philosophy: "#9B5DE5", // purple
-    business: "#94a3b8", // slate-400
-    health: "#F15BB5", // pink
-    arts: "#d946ef", // fuchsia-500
-    upload: "#9B5DE5", // purple
-  };
-  return colorMap[subjectId] || "#3A29FF"; // default color
-};
-
-// Get Aurora colors based on selected subjects
-const getAuroraColors = (selectedSubjects: string[]): string[] => {
-  if (selectedSubjects.length === 0) {
-    return ["#F15BB5", "#00BBF9", "#9B5DE5"]; // default colors
-  }
-
-  const colors = selectedSubjects.map(getSubjectColor);
-
-  // Pad to 3 colors if needed
-  while (colors.length < 3) {
-    colors.push(colors[colors.length - 1] || "#3A29FF");
-  }
-
-  // Return only first 3 colors
-  return colors.slice(0, 3);
-};
-
 interface LandingPageProps {
-  /** Runtime opt-out to disable heavy effects (for low-end devices) */
+  accountControls?: ReactNode;
+  userName?: string;
+  /** Kept for compatibility; the setup screen no longer renders heavy effects. */
   disableHeavyEffects?: boolean;
 }
 
-export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: LandingPageProps = {}) {
+export function LandingPage({
+  accountControls,
+  userName,
+}: LandingPageProps = {}) {
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [selectedMode, setSelectedMode] = useState<ConversationMode>("fun");
   const [isLoading, setIsLoading] = useState(false);
@@ -126,15 +47,6 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
   const runConfig = config.run;
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  // Runtime state for disabling heavy effects (can be toggled by user or set via prop)
-  const [disableHeavyEffectsState, setDisableHeavyEffectsState] = useState(false);
-
-  // SSR-safe detection of prefers-reduced-motion
-  const prefersReducedMotion = usePrefersReducedMotion();
-
-  // Combine all sources: prop, state, or user preference
-  const shouldReduceMotion = prefersReducedMotion || disableHeavyEffectsProp || disableHeavyEffectsState;
-
   /**
    * Last config the server answered with. Kept across a refresh so the banners
    * below don't flicker while `handleStart` re-checks; `configUnreachable`
@@ -147,11 +59,16 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
    * that did nothing, which is the one state this page must never fake.
    */
   const configUnreachable = config.status === "error";
-  const needsApiKey = !configUnreachable && !!configStatus && !configStatus.hasApiKey;
+  const needsApiKey =
+    !configUnreachable && !!configStatus && !configStatus.hasApiKey;
   const missingAgentForMode =
-    !configUnreachable && configStatus ? !configStatus.agentIds[selectedMode] : false;
+    !configUnreachable && configStatus
+      ? !configStatus.agentIds[selectedMode]
+      : false;
   const canStart =
     selectedSubjects.length > 0 &&
+    config.status !== "idle" &&
+    config.status !== "loading" &&
     !needsApiKey &&
     !missingAgentForMode &&
     !configUnreachable;
@@ -159,9 +76,6 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
   useEffect(() => {
     void runConfig(poduApi.getConfig);
   }, [runConfig]);
-
-  // Compute Aurora colors based on selected subjects
-  const auroraColors = useMemo(() => getAuroraColors(selectedSubjects), [selectedSubjects]);
 
   const handleStart = async () => {
     if (selectedSubjects.length === 0) return;
@@ -182,7 +96,9 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
         return;
       }
       if (latest.ok && !latest.data.agentIds[selectedMode]) {
-        setStartFailure(failureCopy("missing_agent_id", "landing", { mode: selectedMode }));
+        setStartFailure(
+          failureCopy("missing_agent_id", "landing", { mode: selectedMode }),
+        );
         return;
       }
 
@@ -220,239 +136,164 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
         systemPrompt={agent.systemPrompt}
         firstMessage={agent.firstMessage}
         subjectCount={selectedSubjects.length}
-        onClose={() => setAgent(null)}
+        onClose={() => {
+          setAgent(null);
+          requestAnimationFrame(() =>
+            document
+              .querySelector<HTMLButtonElement>('[data-testid="play-button"]')
+              ?.focus(),
+          );
+        }}
       />
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {/* LightRays background */}
-      <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-        <LightRays
-          raysOrigin="top-center"
-          raysColor={getModeColor(selectedMode)}
-          // Reduce animation intensity when motion should be reduced
-          raysSpeed={shouldReduceMotion ? 0.3 : 1.5}
-          lightSpread={0.8}
-          rayLength={1.2}
-          // Disable mouse following for motion-sensitive users
-          followMouse={!shouldReduceMotion}
-          mouseInfluence={shouldReduceMotion ? 0 : 0.1}
-          // Reduce/eliminate noise and distortion effects
-          noiseAmount={shouldReduceMotion ? 0 : 0.1}
-          distortion={shouldReduceMotion ? 0 : 0.05}
-          className="w-full h-full"
-        />
-      </div>
-
-      {/* Aurora background - positioned at bottom, on top of LightRays */}
-      <div className="fixed bottom-0 left-0 right-0 h-1/2 overflow-hidden pointer-events-none z-[1] bg-transparent">
-        <div className="w-full h-full rotate-180 bg-transparent">
-          <Aurora
-            colorStops={auroraColors}
-            blend={0.5}
-            // Reduce animation intensity when motion should be reduced
-            amplitude={shouldReduceMotion ? 0.2 : 1.0}
-            speed={shouldReduceMotion ? 0.1 : 0.5}
-            className="w-full h-full"
-          />
-        </div>
-      </div>
-
-      {/* Header */}
-      <header className="relative z-10 px-6 pt-12 pb-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div className="absolute inset-0 rounded-xl bg-white blur-lg opacity-50" />
-              <div className="relative p-3 rounded-xl bg-white">
-                <img
-                  src="/assets/podu-logo.png"
-                  alt="PODU Logo"
-                  className="w-[60px] h-[60px] object-contain"
-                />
-              </div>
-            </div>
-            <div>
-              <h1 className="font-display text-4xl font-extrabold tracking-tight">
-                PODU
-              </h1>
-              <p className="font-mono text-xs text-muted-foreground -mt-1">
-                Interactive Podcast
-              </p>
-            </div>
-          </div>
-
+    <div className="workspace-page">
+      <a href="#main-content" className="skip-link">
+        Skip to content
+      </a>
+      <header className="site-header">
+        <Brand subtitle="Room for a conversation." />
+        <div className="account-nav">
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
             aria-label="API settings"
-            title={
-              configStatus?.hasApiKey
-                ? `API key ${configStatus.apiKeyPreview ?? "configured"}`
-                : "Add your ElevenLabs API key"
-            }
-            className={cn(
-              "flex items-center gap-2 rounded-full border px-3 py-2 font-mono text-xs transition-colors",
-              configStatus?.hasApiKey
-                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20"
-                : "border-amber-500/40 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20",
-            )}
+            className="settings-button"
           >
-            {configStatus?.hasApiKey ? (
-              <>
-                <KeyRound className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Connected</span>
-              </>
-            ) : (
-              <>
-                <Settings2 className="w-3.5 h-3.5" />
-                <span>Add API key</span>
-              </>
-            )}
+            <Settings2 size={18} aria-hidden="true" />
+            <span>Settings</span>
           </button>
+          {accountControls}
         </div>
       </header>
-
-      {/* Main content - scrollable */}
-      <main className="relative z-10 flex-1 overflow-y-auto scrollbar-hide px-6 pb-48">
-        <div className="space-y-5 max-w-md mx-auto">
-          {/* Subject selector */}
-          <section>
-            <SubjectSelector
-              selected={selectedSubjects}
-              onSelectionChange={setSelectedSubjects}
-              maxSelections={3}
-            />
-          </section>
-
-          {/* Mode selector */}
-          <section>
-            <ModeSelector
-              selected={selectedMode}
-              onSelect={setSelectedMode}
-            />
-          </section>
-        </div>
-      </main>
-
-      {/* Fixed bottom play button */}
-      <footer className="fixed bottom-0 inset-x-0 z-20">
-        {/* Content */}
-        <div className="relative px-6 py-8 pb-10">
-          <div className="flex flex-col items-center gap-4">
-            {/* Validation / config messages */}
-            {!startFailure && (
-              <>
-                {configUnreachable ? (
-                  /**
-                   * Never auto-opens Settings: the key isn't the problem, and
-                   * a modal demanding one would send the user off to fix
-                   * something that isn't broken.
-                   */
-                  <div className="flex flex-col items-center gap-2 w-full max-w-md">
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive">
-                      <WifiOff className="w-4 h-4 flex-shrink-0" />
-                      <p className="font-mono text-xs">
-                        Can't reach the PODU server — is bun dev running?
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void runConfig(poduApi.getConfig)}
-                      disabled={config.status === "loading"}
-                      className="font-mono text-xs"
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                ) : needsApiKey ? (
-                  <button
-                    type="button"
-                    onClick={() => setSettingsOpen(true)}
-                    className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-400 hover:bg-amber-500/20 transition-colors"
-                  >
-                    <KeyRound className="w-4 h-4" />
-                    <span className="font-mono text-xs">
-                      {failureCopy("missing_api_key", "setup").message}
-                    </span>
-                  </button>
-                ) : missingAgentForMode ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-amber-400 max-w-md">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                    <p className="font-mono text-xs">
-                      {failureCopy("missing_agent_id", "setup", { mode: selectedMode }).message}
-                    </p>
-                  </div>
-                ) : selectedSubjects.length === 0 ? (
-                  <p className="font-mono text-xs text-muted-foreground">
-                    Select at least one subject to start
-                  </p>
-                ) : null}
-              </>
-            )}
-
-            {/* Error message */}
-            {startFailure && (
-              <div className="flex flex-col items-center gap-2 w-full max-w-md">
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <p className="font-mono text-xs">{startFailure.message}</p>
-                </div>
-                <div className="flex gap-2">
-                  {requiresApiKeyAction(startFailure.code) && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSettingsOpen(true)}
-                      className="font-mono text-xs"
-                    >
-                      Open Settings
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleStart}
-                    disabled={isLoading || !canStart}
-                    className="font-mono text-xs"
-                  >
-                    Retry
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Play button */}
-            <PlayButton
-              mode={selectedMode}
-              isLoading={isLoading}
-              disabled={!canStart}
-              onClick={handleStart}
-            />
+      <main id="main-content" tabIndex={-1} className="workspace-layout">
+        <div className="workspace-intro">
+          <p className="eyebrow">
+            {userName ? `Welcome back, ${userName}` : "A little room to think"}
+          </p>
+          <h1>
+            Follow a thought.
+            <br />
+            See where it goes.
+          </h1>
+          <p>
+            A question, a new interest, or something you want to work through.
+            Make this conversation yours.
+          </p>
+          <div className="workspace-aside">
+            <Mic size={18} aria-hidden="true" />
+            <span>
+              Speak naturally. Take your time.
+              <br />
+              There’s no perfect place to start.
+            </span>
           </div>
         </div>
+        <div className="conversation-setup">
+          <SubjectSelector
+            selected={selectedSubjects}
+            onSelectionChange={setSelectedSubjects}
+            maxSelections={3}
+          />
+          <ModeSelector selected={selectedMode} onSelect={setSelectedMode} />
+          <div className="start-section">
+            <div id="start-guidance" className="start-guidance" role="status">
+              {startFailure ? (
+                <p className="inline-error">
+                  <AlertCircle size={18} aria-hidden="true" />
+                  {startFailure.message}
+                </p>
+              ) : configUnreachable ? (
+                <p className="inline-error">
+                  {config.error?.status === 401
+                    ? failureCopy("authentication_error", "landing").message
+                    : "We couldn’t connect to PODU. Please try again."}
+                </p>
+              ) : config.status === "loading" && !configStatus ? (
+                <p>Getting your conversation ready…</p>
+              ) : needsApiKey ? (
+                <p>
+                  Connect ElevenLabs in Settings to start your local
+                  conversation.
+                </p>
+              ) : missingAgentForMode ? (
+                <p>
+                  {
+                    failureCopy("missing_agent_id", "setup", {
+                      mode: selectedMode,
+                    }).message
+                  }
+                </p>
+              ) : selectedSubjects.length === 0 ? (
+                <p>Choose at least one topic to get started.</p>
+              ) : (
+                <p>
+                  {selectedSubjects.length} topic
+                  {selectedSubjects.length === 1 ? "" : "s"} selected. Ready
+                  when you are.
+                </p>
+              )}
+            </div>
+            <div className="start-actions">
+              <PlayButton
+                mode={selectedMode}
+                isLoading={isLoading}
+                disabled={!canStart}
+                onClick={handleStart}
+                describedBy="start-guidance microphone-note"
+              />
+              {(needsApiKey || requiresApiKeyAction(startFailure?.code)) && (
+                <Button variant="outline" onClick={() => setSettingsOpen(true)}>
+                  Open Settings
+                </Button>
+              )}
+              {(config.error?.status === 401 ||
+                startFailure?.action === "sign_in") && (
+                <a className="quiet-link" href="/sign-in">
+                  Sign in again
+                </a>
+              )}
+              {configUnreachable && (
+                <Button
+                  variant="outline"
+                  onClick={() => void runConfig(poduApi.getConfig)}
+                  disabled={config.status === "loading"}
+                >
+                  Retry
+                </Button>
+              )}
+              {startFailure && (
+                <Button
+                  variant="outline"
+                  onClick={handleStart}
+                  disabled={isLoading || !canStart}
+                >
+                  Retry
+                </Button>
+              )}
+            </div>
+            <p id="microphone-note" className="microphone-note">
+              <Mic size={14} aria-hidden="true" /> You’ll be asked for
+              microphone access before you speak.
+            </p>
+          </div>
+        </div>
+      </main>
+      <footer className="site-footer">
+        <span>PODU · Made for curious minds.</span>
+        <span>Your conversation partner is AI.</span>
       </footer>
-
       <ApiKeySettings
-        open={settingsOpen || needsApiKey}
-        blocking={needsApiKey}
+        open={settingsOpen}
         onOpenChange={setSettingsOpen}
         status={configStatus}
-        /**
-         * The dialog no longer fetches config itself — it reports that
-         * something changed and this page, which owns the one config request,
-         * re-reads it.
-         */
         onSaved={async () => {
           const next = await runConfig(poduApi.getConfig);
           if (next.ok && next.data.hasApiKey) {
             setSettingsOpen(false);
-            if (requiresApiKeyAction(startFailure?.code)) {
-              setStartFailure(null);
-            }
+            if (requiresApiKeyAction(startFailure?.code)) setStartFailure(null);
           }
         }}
       />

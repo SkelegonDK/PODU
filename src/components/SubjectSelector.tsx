@@ -1,34 +1,26 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { 
-  Cpu, 
-  Leaf, 
-  BookOpen, 
-  Brain, 
-  TrendingUp, 
-  Heart, 
+import {
+  Cpu,
+  Leaf,
+  BookOpen,
+  Brain,
+  TrendingUp,
+  Heart,
   Palette,
-  Pin,
   Check,
-  Upload
+  Upload,
 } from "lucide-react";
 import { UploadDialog } from "./UploadDialog";
 
-export interface Subject {
-  id: string;
-  name: string;
-  icon: React.ReactNode;
-  color: string;
-}
-
-const subjects: Subject[] = [
-  { id: "tech", name: "Technology & AI", icon: <Cpu className="w-5 h-5" />, color: "from-cyan-500 to-blue-600" },
-  { id: "science", name: "Science & Nature", icon: <Leaf className="w-5 h-5" />, color: "from-green-500 to-emerald-600" },
-  { id: "history", name: "History & Culture", icon: <BookOpen className="w-5 h-5" />, color: "from-yellow-400 to-amber-500" },
-  { id: "philosophy", name: "Philosophy & Ethics", icon: <Brain className="w-5 h-5" />, color: "from-purple-500 to-violet-600" },
-  { id: "business", name: "Business", icon: <TrendingUp className="w-5 h-5" />, color: "from-slate-400 to-zinc-500" },
-  { id: "health", name: "Health & Wellness", icon: <Heart className="w-5 h-5" />, color: "from-rose-500 to-pink-600" },
-  { id: "arts", name: "Arts & Creativity", icon: <Palette className="w-5 h-5" />, color: "from-fuchsia-500 to-purple-600" },
+const subjects = [
+  { id: "tech", name: "Technology & AI", icon: Cpu },
+  { id: "science", name: "Science & Nature", icon: Leaf },
+  { id: "history", name: "History & Culture", icon: BookOpen },
+  { id: "philosophy", name: "Philosophy & Ethics", icon: Brain },
+  { id: "business", name: "Business", icon: TrendingUp },
+  { id: "health", name: "Health & Wellness", icon: Heart },
+  { id: "arts", name: "Arts & Creativity", icon: Palette },
 ];
 
 interface SubjectSelectorProps {
@@ -37,185 +29,75 @@ interface SubjectSelectorProps {
   maxSelections?: number;
 }
 
-export function SubjectSelector({ 
-  selected, 
-  onSelectionChange, 
-  maxSelections = 3 
+export function SubjectSelector({
+  selected,
+  onSelectionChange,
+  maxSelections = 3,
 }: SubjectSelectorProps) {
-  const [pinnedSubject, setPinnedSubject] = useState<string | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
-
-  const toggleSubject = (subjectId: string) => {
-    // Special handling for upload subject
-    if (subjectId === "upload") {
-      setIsUploadDialogOpen(true);
-      return;
-    }
-
-    if (selected.includes(subjectId)) {
-      // Deselect
-      onSelectionChange(selected.filter(id => id !== subjectId));
-      if (pinnedSubject === subjectId) {
-        setPinnedSubject(null);
-      }
-    } else if (selected.length < maxSelections) {
-      // Select
-      onSelectionChange([...selected, subjectId]);
-    }
-  };
-
-  const togglePin = (e: React.MouseEvent, subjectId: string) => {
-    e.stopPropagation();
-    if (pinnedSubject === subjectId) {
-      setPinnedSubject(null);
-    } else {
-      setPinnedSubject(subjectId);
-      // Ensure pinned subject is selected
-      if (!selected.includes(subjectId)) {
-        if (selected.length >= maxSelections) {
-          // Replace last selected with pinned
-          onSelectionChange([...selected.slice(0, -1), subjectId]);
-        } else {
-          onSelectionChange([...selected, subjectId]);
-        }
-      }
-    }
-  };
-
-  // Keep original order - no reordering on selection
-  const sortedSubjects = subjects;
-
-  // Add upload subject at the end
-  const uploadSubject: Subject = {
-    id: "upload",
-    name: "Upload Document",
-    icon: <Upload className="w-5 h-5" />,
-    color: "from-indigo-500 to-purple-600",
-  };
-
+  const atLimit = selected.length >= maxSelections;
   return (
-    <div className="w-full">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display font-bold text-lg text-foreground/90">Subjects</h2>
-        <span className="text-xs font-mono text-muted-foreground">
+    <div className="subject-selector">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">01 / Your interests</p>
+          <h2 id="subjects-heading">Where shall we begin?</h2>
+        </div>
+        <span className="selection-count" role="status">
           {selected.length}/{maxSelections} selected
         </span>
       </div>
-      
-      <div className="grid grid-cols-2 gap-2.5">
-        {sortedSubjects.map((subject) => {
-          const isSelected = selected.includes(subject.id);
-          const isPinned = pinnedSubject === subject.id;
-          const isDisabled = !isSelected && selected.length >= maxSelections;
-          
+      <p id="subjects-help" className="section-description">
+        Choose up to {maxSelections} topics. Follow whatever interests you.
+      </p>
+      <div
+        className="subject-grid"
+        role="group"
+        aria-labelledby="subjects-heading"
+        aria-describedby="subjects-help"
+      >
+        {subjects.map(({ id, name, icon: Icon }) => {
+          const isSelected = selected.includes(id);
           return (
-            <div key={subject.id} className="relative group">
-              <button
-                onClick={() => !isDisabled && toggleSubject(subject.id)}
-                disabled={isDisabled}
-                className={cn(
-                  "relative flex items-center gap-2.5 p-3 rounded-xl w-full",
-                  "border-2 transition-all duration-300",
-                  "font-display text-sm font-medium text-left",
-                  isSelected 
-                    ? "border-primary/60 bg-primary/10" 
-                    : "border-border/50 bg-card/50 hover:border-border hover:bg-card/80",
-                  isDisabled && "opacity-40 cursor-not-allowed",
-                  isPinned && "ring-2 ring-primary/40 ring-offset-2 ring-offset-background"
-                )}
-              >
-                {/* Gradient background on selection */}
-                {isSelected && (
-                  <div className={cn(
-                    "absolute inset-0 rounded-xl opacity-20 bg-linear-to-br",
-                    subject.color
-                  )} />
-                )}
-                
-                {/* Icon */}
-                <div className={cn(
-                  "relative shrink-0 p-2 rounded-lg bg-linear-to-br",
-                  subject.color,
-                  "text-white shadow-lg"
-                )}>
-                  {subject.icon}
-                </div>
-                
-                {/* Name */}
-                <span className="relative flex-1 truncate">{subject.name}</span>
-                
-                {/* Selection indicator */}
-                {isSelected && (
-                  <div className="relative shrink-0">
-                    <Check className="w-4 h-4 text-primary" />
-                  </div>
-                )}
-              </button>
-              
-              {/* Pin button - outside the button to avoid nesting */}
-              {isSelected && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    togglePin(e as any, subject.id);
-                  }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  className={cn(
-                    "absolute -top-1.5 -right-1.5 p-1 rounded-full",
-                    "bg-background border border-border shadow-md",
-                    "transition-all duration-200",
-                    isPinned 
-                      ? "text-primary rotate-45 opacity-100" 
-                      : "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
-                  )}
-                  aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${subject.name}`}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      togglePin(e as any, subject.id);
-                    }
-                  }}
-                >
-                  <Pin className="w-3 h-3" />
-                </button>
-              )}
-            </div>
+            <button
+              type="button"
+              key={id}
+              aria-pressed={isSelected}
+              disabled={!isSelected && atLimit}
+              onClick={() =>
+                onSelectionChange(
+                  isSelected
+                    ? selected.filter((subject) => subject !== id)
+                    : [...selected, id],
+                )
+              }
+              className={cn("subject-option", isSelected && "is-selected")}
+            >
+              <Icon size={20} aria-hidden="true" />
+              <span>{name}</span>
+              <span className="subject-check" aria-hidden="true">
+                {isSelected && <Check size={16} />}
+              </span>
+            </button>
           );
         })}
-        
-        {/* Upload Document button */}
         <button
-          onClick={() => toggleSubject(uploadSubject.id)}
-          className={cn(
-            "relative group flex items-center gap-2.5 p-3 rounded-xl",
-            "border-2 transition-all duration-300",
-            "font-display text-sm font-medium text-left",
-            "border-border/50 bg-card/50 hover:border-border hover:bg-card/80"
-          )}
+          type="button"
+          className="subject-option upload-option"
+          onClick={() => setIsUploadDialogOpen(true)}
+          aria-haspopup="dialog"
         >
-          {/* Icon */}
-          <div className={cn(
-            "relative shrink-0 p-2 rounded-lg bg-linear-to-br",
-            uploadSubject.color,
-            "text-white shadow-lg"
-          )}>
-            {uploadSubject.icon}
-          </div>
-          
-          {/* Name */}
-          <span className="relative flex-1 truncate">{uploadSubject.name}</span>
+          <Upload size={20} aria-hidden="true" />
+          <span>
+            Upload Document <small>Bring your own notes</small>
+          </span>
         </button>
       </div>
-      
-      {pinnedSubject && (
-        <p className="mt-2 text-xs text-muted-foreground font-mono">
-          Pinned topic will be the main focus of the conversation
-        </p>
-      )}
-
+      <p className="selection-help" role="status">
+        {atLimit
+          ? "Three topics selected. Deselect one to try another."
+          : "A broad interest is enough. You can find your question as you go."}
+      </p>
       <UploadDialog
         open={isUploadDialogOpen}
         onOpenChange={setIsUploadDialogOpen}
@@ -223,6 +105,4 @@ export function SubjectSelector({
     </div>
   );
 }
-
 export { subjects };
-

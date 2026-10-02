@@ -38,8 +38,7 @@ export type ApiError = {
 };
 
 export type ApiResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: ApiError };
+  { ok: true; data: T } | { ok: false; error: ApiError };
 
 /** Code used when `fetch` itself rejects — no response, so no status. */
 export const NETWORK_ERROR_CODE = "network_error";
@@ -63,6 +62,19 @@ interface ErrorBody {
   code?: unknown;
 }
 
+type AccessTokenProvider = () => Promise<string | null>;
+let accessTokenProvider: AccessTokenProvider | null = null;
+
+/** Install Clerk's fresh-token getter while the signed-in workspace is mounted. */
+export function configureAccessToken(
+  provider: AccessTokenProvider,
+): () => void {
+  accessTokenProvider = provider;
+  return () => {
+    if (accessTokenProvider === provider) accessTokenProvider = null;
+  };
+}
+
 /** Parse a JSON body, tolerating an empty or non-JSON one. */
 async function readBody(response: Response): Promise<unknown> {
   try {
@@ -80,14 +92,38 @@ async function readBody(response: Response): Promise<unknown> {
  * schema check would be a second source of truth for shapes the server already
  * types.
  */
-async function call<T>(input: string, init?: RequestInit): Promise<ApiResult<T>> {
+async function call<T>(
+  input: string,
+  init?: RequestInit,
+): Promise<ApiResult<T>> {
+  const headers = new Headers(init?.headers);
+  if (accessTokenProvider) {
+    try {
+      const token = await accessTokenProvider();
+      if (!token) throw new Error("No active session");
+      headers.set("Authorization", `Bearer ${token}`);
+    } catch {
+      return {
+        ok: false,
+        error: {
+          code: "authentication_error",
+          message: "Your session couldn’t be verified. Please sign in again.",
+          status: 401,
+        },
+      };
+    }
+  }
   let response: Response;
   try {
-    response = await fetch(input, init);
+    response = await fetch(input, { ...init, headers });
   } catch {
     return {
       ok: false,
-      error: { code: NETWORK_ERROR_CODE, message: NETWORK_ERROR_MESSAGE, status: 0 },
+      error: {
+        code: NETWORK_ERROR_CODE,
+        message: NETWORK_ERROR_MESSAGE,
+        status: 0,
+      },
     };
   }
 
@@ -98,7 +134,8 @@ async function call<T>(input: string, init?: RequestInit): Promise<ApiResult<T>>
     return {
       ok: false,
       error: {
-        code: typeof code === "string" && code ? code : `http_${response.status}`,
+        code:
+          typeof code === "string" && code ? code : `http_${response.status}`,
         message:
           typeof error === "string" && error
             ? error
@@ -124,7 +161,9 @@ export function getConfig(): Promise<ApiResult<ConfigStatus>> {
   return call<ConfigStatus>("/api/config");
 }
 
-export function setApiKey(apiKey: string): Promise<ApiResult<{ ok: true; preview: string }>> {
+export function setApiKey(
+  apiKey: string,
+): Promise<ApiResult<{ ok: true; preview: string }>> {
   return call("/api/config", {
     method: "POST",
     headers: JSON_HEADERS,
@@ -147,7 +186,9 @@ export function getAgent(
   });
 }
 
-export function getConversationToken(agentId: string): Promise<ApiResult<{ token: string }>> {
+export function getConversationToken(
+  agentId: string,
+): Promise<ApiResult<{ token: string }>> {
   return call(`/api/agents/${encodeURIComponent(agentId)}/conversation-token`);
 }
 
@@ -155,9 +196,14 @@ export function uploadDocument(file: File): Promise<ApiResult<DocumentMeta>> {
   const formData = new FormData();
   formData.append("file", file);
   // No Content-Type header: the browser must set the multipart boundary.
-  return call<DocumentMeta>("/api/documents", { method: "POST", body: formData });
+  return call<DocumentMeta>("/api/documents", {
+    method: "POST",
+    body: formData,
+  });
 }
 
-export function deleteDocument(id: string): Promise<ApiResult<{ success: true }>> {
+export function deleteDocument(
+  id: string,
+): Promise<ApiResult<{ success: true }>> {
   return call(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
 }

@@ -1,6 +1,6 @@
 /**
  * React entry point — mounts the app into #root.
- * No auth providers: single-user local demo.
+ * App enables Clerk when a publishable key is configured.
  */
 
 import { StrictMode } from "react";

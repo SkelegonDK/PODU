@@ -10,16 +10,16 @@ Three conversation modes with distinct personalities:
 - **Educational** — Clear explanations that build genuine understanding
 - **Deep** — Philosophical exploration that challenges assumptions
 
-Runs locally with nothing but an ElevenLabs API key and three agent IDs. Your API key is entered in the app and stored server-side — it never ships to the browser. Clone, set env vars, `bun dev`.
+Runs locally with nothing but an ElevenLabs API key and three agent IDs. Your ElevenLabs API key is entered in Settings and stored server-side. Clerk accounts are optional: add a publishable key to enable the welcome, sign-up, sign-in, and account-management flows. Clone, set env vars, `bun dev`.
 
-> Looking for the full SaaS version with Clerk auth, Convex DB, and billing? See the [`full-version`](../../tree/full-version) branch.
+> Looking for Convex storage and billing? See the [`full-version`](../../tree/full-version) branch.
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Runtime | [Bun](https://bun.sh) |
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Shadcn/UI |
+| Layer    | Technology                                                     |
+| -------- | -------------------------------------------------------------- |
+| Runtime  | [Bun](https://bun.sh)                                          |
+| Frontend | React 19, TypeScript, Tailwind CSS 4, Shadcn/UI                |
 | Voice AI | [ElevenLabs](https://elevenlabs.io) Conversational AI (WebRTC) |
 
 ## Prerequisites
@@ -66,16 +66,24 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000), pick your topics and mode, and start a conversation.
 
+## Clerk accounts
+
+Set `BUN_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...` in `.env.local` to enable accounts with your existing Clerk development instance. Restart `bun dev` after changing it. The frontend includes only this publishable key; keep `CLERK_SECRET_KEY` server-side.
+
+With Clerk enabled, signed-out visitors see the welcome page, `/sign-up` and `/sign-in` use branded Clerk forms, and signed-in users enter the conversation workspace with profile and sign-out controls. `/welcome` is also available for previewing the public page. Without a publishable key, `/` and `/app` keep working as the local app.
+
+The frontend sends a fresh Clerk bearer token with each API request. **The current local server does not validate these tokens or isolate users' documents.** Coordinate server authentication and user-owned storage before launching publicly. See [frontend readiness and backend handoff](FRONTEND_READINESS.md).
+
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `bun dev` | Start dev server with hot reload |
-| `bun start` | Start production server |
-| `bun run build` | Build for production (outputs to `dist/`) |
-| `bun test` | Run unit tests |
-| `bun run test:e2e` | Run Playwright end-to-end tests |
-| `bun run audit:agents` | Validate ElevenLabs agent configuration |
+| Command                | Description                               |
+| ---------------------- | ----------------------------------------- |
+| `bun dev`              | Start dev server with hot reload          |
+| `bun start`            | Start production server                   |
+| `bun run build`        | Build for production (outputs to `dist/`) |
+| `bun test`             | Run unit tests                            |
+| `bun run test:e2e`     | Run Playwright end-to-end tests           |
+| `bun run audit:agents` | Validate ElevenLabs agent configuration   |
 
 ## Project Structure
 
@@ -90,6 +98,8 @@ src/
     knowledgebase.ts    # Document store for context injection (SQLite-backed)
     auditAgents.ts      # ElevenLabs agent configuration validator
   components/
+    WelcomePage.tsx     # Public introduction and account entry points
+    ClerkApp.tsx        # Clerk account pages, session handling, profile controls
     LandingPage.tsx     # Main app view (topic + mode selection)
     ConversationView.tsx # Active conversation UI with waveform
     SubjectSelector.tsx # Topic picker (1-3 topics)

@@ -130,6 +130,9 @@ const server = serve({
           target: "browser",
           format: "esm",
           minify: false,
+          define: {
+            "process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY": JSON.stringify(process.env.BUN_PUBLIC_CLERK_PUBLISHABLE_KEY ?? ""),
+          },
           sourcemap: "inline",
         });
 

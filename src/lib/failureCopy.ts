@@ -34,6 +34,7 @@ export type FailureCode =
   | "upstream_error"
   /** Our own server errored (HTTP 5xx). */
   | "server_error"
+  | "authentication_error"
   | "mic_permission_denied"
   | "mic_not_found"
   | "mic_in_use"
@@ -54,7 +55,8 @@ export type FailureSurface =
   | "setup";
 
 /** The remediation a surface should offer alongside the message. */
-export type FailureAction = "open_settings" | "configure_env" | "retry";
+export type FailureAction =
+  "open_settings" | "configure_env" | "retry" | "sign_in";
 
 export interface FailureCopy {
   readonly code: FailureCode;
@@ -78,6 +80,7 @@ const SERVER_FAILURE_CODES = [
   "invalid_api_key",
   "missing_agent_id",
   "upstream_error",
+  "authentication_error",
 ] as const;
 
 type ServerFailureCode = (typeof SERVER_FAILURE_CODES)[number];
@@ -92,6 +95,7 @@ export function toFailureCode(
   status?: number,
 ): FailureCode {
   if (code && isServerFailureCode(code)) return code;
+  if (status === 401) return "authentication_error";
   if (status !== undefined && status >= 500) return "server_error";
   return "unknown";
 }
@@ -140,7 +144,10 @@ function missingAgentMessage(context: FailureContext): string {
     .join(", ")} in .env and restart the server.`;
 }
 
-function unknownMessage(surface: FailureSurface, context: FailureContext): string {
+function unknownMessage(
+  surface: FailureSurface,
+  context: FailureContext,
+): string {
   if (context.serverMessage) return context.serverMessage;
   if (surface === "conversation") {
     return context.status !== undefined
@@ -157,6 +164,13 @@ export function failureCopy(
   context: FailureContext = {},
 ): FailureCopy {
   switch (code) {
+    case "authentication_error":
+      return {
+        code,
+        action: "sign_in",
+        message: "Your session couldn’t be verified. Please sign in again.",
+      };
+
     case "missing_api_key":
       return {
         code,
@@ -214,16 +228,24 @@ export function failureCopy(
       };
 
     case "mic_not_found":
-      return { code, message: "No microphone detected. Connect a microphone and try again." };
+      return {
+        code,
+        message: "No microphone detected. Connect a microphone and try again.",
+      };
 
     case "mic_in_use":
       return {
         code,
-        message: "Your microphone is in use by another app. Close it and try again.",
+        message:
+          "Your microphone is in use by another app. Close it and try again.",
       };
 
     case "unknown":
-      return { code, action: "retry", message: unknownMessage(surface, context) };
+      return {
+        code,
+        action: "retry",
+        message: unknownMessage(surface, context),
+      };
   }
 }
 
@@ -262,7 +284,8 @@ export function describeException(
       return failureCopy("invalid_api_key", surface);
     }
 
-    if (message) return failureCopy("unknown", surface, { serverMessage: message });
+    if (message)
+      return failureCopy("unknown", surface, { serverMessage: message });
   }
 
   return failureCopy("unknown", surface);

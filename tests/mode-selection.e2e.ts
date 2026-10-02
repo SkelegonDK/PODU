@@ -7,10 +7,9 @@ test.describe("Mode Selection", () => {
     await page.goto("/");
   });
 
-  test("should default to EDU mode", async ({ page }) => {
-    // EDU mode button should be visually selected by default
-    const eduButton = page.getByRole("button", { name: /edu/i });
-    await expect(eduButton).toBeVisible();
+  test("should default to Fun mode", async ({ page }) => {
+    const funButton = page.getByRole("button", { name: /fun/i });
+    await expect(funButton).toHaveAttribute("aria-pressed", "true");
   });
 
   test("should switch between modes", async ({ page }) => {
@@ -27,7 +26,9 @@ test.describe("Mode Selection", () => {
     await eduButton.click();
   });
 
-  test("should show correct mode badge in conversation view", async ({ page }) => {
+  test("should show correct mode badge in conversation view", async ({
+    page,
+  }) => {
     // Select FUN mode
     await page.getByRole("button", { name: /fun/i }).click();
 
@@ -53,7 +54,9 @@ test.describe("Mode Selection", () => {
     await expect(modeBadge).toHaveText("EDU");
   });
 
-  test("should show DEEP badge when DEEP mode is selected", async ({ page }) => {
+  test("should show DEEP badge when DEEP mode is selected", async ({
+    page,
+  }) => {
     await page.getByRole("button", { name: /deep/i }).click();
     await page.getByRole("button", { name: /philosophy/i }).click();
     await page.getByTestId("play-button").click();
