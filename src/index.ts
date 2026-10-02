@@ -175,8 +175,10 @@ const server = serve({
           plugins: [plugin],
           target: "browser",
           format: "esm",
-          define: { __PODU_PUBLIC_CONFIG__: JSON.stringify(publicConfig()) },
           minify: false,
+          define: {
+            __PODU_PUBLIC_CONFIG__: JSON.stringify(publicConfig()),
+          },
           sourcemap: "inline",
         });
 

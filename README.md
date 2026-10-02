@@ -16,13 +16,13 @@ See [backend upgrade and deployment notes](docs/backend-upgrade.md) for setup, v
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Runtime | [Bun](https://bun.sh) |
-| Frontend | React 19, TypeScript, Tailwind CSS 4, Shadcn/UI |
-| Voice AI | ElevenAgents, Eleven v4 Turbo, WebRTC |
-| Authentication | Clerk |
-| Persistence | Convex database + file storage |
+| Layer          | Technology                                      |
+| -------------- | ----------------------------------------------- |
+| Runtime        | [Bun](https://bun.sh)                           |
+| Frontend       | React 19, TypeScript, Tailwind CSS 4, Shadcn/UI |
+| Voice AI       | ElevenAgents, Eleven v4 Turbo, WebRTC           |
+| Authentication | Clerk                                           |
+| Persistence    | Convex database + file storage                  |
 
 See `convex/` for the authenticated document/conversation functions, memory worker, recording worker, and webhook endpoint.
 
@@ -80,20 +80,26 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000), sign in, pick your topics and mode, and start a conversation. For an explicit localhost-only demo without Clerk/Convex, use `bun run dev:local`.
 
+## Account and welcome pages
+
+Signed-out visitors see the PODU welcome page. `/sign-up` and `/sign-in` use branded Clerk forms with Uncut Sans and the supplied slate, blue, pale sky, ghost white, and coral palette. Signed-in users enter the workspace with account controls, saved conversations, and recording opt-in. `/welcome` is always public.
+
+The frontend uses the server’s public configuration and requests Clerk’s `convex` JWT template for authenticated API calls. `BUN_PUBLIC_CLERK_PUBLISHABLE_KEY` is supported as an alias for `CLERK_PUBLISHABLE_KEY`. Local mode must be explicitly enabled with `bun run dev:local`; missing SaaS credentials do not bypass authentication. See [frontend readiness](FRONTEND_READINESS.md) for validation and remaining live checks.
+
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `bun dev` | Start dev server with hot reload |
-| `bun run dev:local` | Start localhost-only SQLite demo |
-| `bun start` | Start production server |
-| `bun run build` | Build for production (outputs to `dist/`) |
-| `bun test` | Run unit tests |
-| `bun run test:backend` | Test Convex ownership, transcripts, and webhook completion |
-| `bun run typecheck` | Check TypeScript |
-| `bun run upgrade:agents` | Preview agent updates (`--apply` to apply) |
-| `bun run test:e2e` | Run Playwright end-to-end tests |
-| `bun run audit:agents` | Validate ElevenLabs agent configuration |
+| Command                  | Description                                                |
+| ------------------------ | ---------------------------------------------------------- |
+| `bun dev`                | Start dev server with hot reload                           |
+| `bun run dev:local`      | Start localhost-only SQLite demo                           |
+| `bun start`              | Start production server                                    |
+| `bun run build`          | Build for production (outputs to `dist/`)                  |
+| `bun test`               | Run unit tests                                             |
+| `bun run test:backend`   | Test Convex ownership, transcripts, and webhook completion |
+| `bun run typecheck`      | Check TypeScript                                           |
+| `bun run upgrade:agents` | Preview agent updates (`--apply` to apply)                 |
+| `bun run test:e2e`       | Run Playwright end-to-end tests                            |
+| `bun run audit:agents`   | Validate ElevenLabs agent configuration                    |
 
 ## Project Structure
 
@@ -109,6 +115,8 @@ src/
     podcastProfile.ts   # v4 Turbo two-host agent profile
     auditAgents.ts      # ElevenLabs agent configuration validator
   components/
+    WelcomePage.tsx     # Public introduction and account entry points
+    ClerkApp.tsx        # Branded Clerk flows, session handling, Convex provider
     LandingPage.tsx     # Main app view (topic + mode selection)
     ConversationView.tsx # Active conversation UI with waveform
     SubjectSelector.tsx # Topic picker (1-3 topics)
