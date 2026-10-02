@@ -1,3 +1,5 @@
+import { ConversationHistory } from "./ConversationHistory";
+import { clientConfig } from "../shared/publicConfig";
 import { useState, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { SubjectSelector } from "./SubjectSelector";
@@ -120,6 +122,8 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
    * a boolean: there is no longer a combination of those four that means
    * "showing the conversation with half an agent".
    */
+  const [saveRecording, setSaveRecording] = useState(false);
+  const [resumeId, setResumeId] = useState<string | undefined>();
   const [agent, setAgent] = useState<poduApi.AgentSession | null>(null);
 
   const config = useRequest<ConfigStatus>();
@@ -186,7 +190,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
         return;
       }
 
-      const result = await poduApi.getAgent(selectedMode, selectedSubjects);
+      const result = await poduApi.getAgent(selectedMode, selectedSubjects, { resumeId, saveRecording });
       if (!result.ok) {
         // Server codes are mapped here and nowhere else; the result is stored
         // as-is rather than thrown, so it never reaches describeException().
@@ -216,6 +220,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
     return (
       <ConversationView
         mode={selectedMode}
+        conversationId={agent.conversationId}
         agentId={agent.agentId}
         systemPrompt={agent.systemPrompt}
         firstMessage={agent.firstMessage}
@@ -284,7 +289,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
             </div>
           </div>
 
-          <button
+          {clientConfig.local && <button
             type="button"
             onClick={() => setSettingsOpen(true)}
             aria-label="API settings"
@@ -311,7 +316,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
                 <span>Add API key</span>
               </>
             )}
-          </button>
+          </button>}
         </div>
       </header>
 
@@ -322,7 +327,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
           <section>
             <SubjectSelector
               selected={selectedSubjects}
-              onSelectionChange={setSelectedSubjects}
+              onSelectionChange={subjects => { setSelectedSubjects(subjects); setResumeId(undefined); }}
               maxSelections={3}
             />
           </section>
@@ -335,6 +340,17 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
             />
           </section>
         </div>
+        {!clientConfig.local && <div className="relative z-10 px-6 py-4 max-w-2xl mx-auto">
+          <label className="flex items-start gap-3 text-sm"><input type="checkbox" checked={saveRecording} onChange={e => setSaveRecording(e.target.checked)} className="mt-1" />
+            <span>Save audio so I can listen again. My transcript and topic notes are saved to my account. ElevenLabs also processes and may retain the call audio.</span>
+          </label>
+          {resumeId && <p className="mt-2 text-sm">Continuing with notes from your previous conversation. <button onClick={() => setResumeId(undefined)} className="underline">Cancel continuation</button></p>}
+        </div>}
+        {!clientConfig.local && <ConversationHistory onResume={(id, mode, topics) => {
+          const ids: Record<string, string> = { Technology: "tech", Science: "science", History: "history", Philosophy: "philosophy", Business: "business", "Health & Wellness": "health", "Arts & Culture": "arts" };
+          setSelectedSubjects(topics.map(t => ids[t]).filter((id): id is string => !!id));
+          setSelectedMode(mode); setResumeId(id);
+        }} />}
       </main>
 
       {/* Fixed bottom play button */}
@@ -376,7 +392,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
                   >
                     <KeyRound className="w-4 h-4" />
                     <span className="font-mono text-xs">
-                      {failureCopy("missing_api_key", "setup").message}
+                      {clientConfig.local ? failureCopy("missing_api_key", "setup").message : "The voice service needs to be configured by the app owner."}
                     </span>
                   </button>
                 ) : missingAgentForMode ? (
@@ -437,7 +453,7 @@ export function LandingPage({ disableHeavyEffects: disableHeavyEffectsProp }: La
       </footer>
 
       <ApiKeySettings
-        open={settingsOpen || needsApiKey}
+        open={clientConfig.local && (settingsOpen || needsApiKey)}
         blocking={needsApiKey}
         onOpenChange={setSettingsOpen}
         status={configStatus}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useConversation } from "@elevenlabs/react";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
+import { TranscriptQueue } from "../lib/transcriptQueue";
 import { cn } from "@/lib/utils";
 import {
   describeException,
@@ -12,6 +13,7 @@ import type { ConversationMode } from "./ModeSelector";
 import { X, Volume2, VolumeX, Mic, AlertCircle } from "lucide-react";
 
 interface ConversationViewProps {
+  conversationId?: string;
   mode: ConversationMode;
   agentId: string;
   systemPrompt: string;
@@ -47,7 +49,12 @@ const modeNames = {
   deep: "DEEP",
 };
 
-export function ConversationView({
+export function ConversationView(props: ConversationViewProps) {
+  return <ConversationProvider><ActiveConversation {...props} /></ConversationProvider>;
+}
+
+function ActiveConversation({
+  conversationId,
   mode,
   agentId,
   systemPrompt,
@@ -62,13 +69,48 @@ export function ConversationView({
   const [startFailure, setStartFailure] = useState<FailureCopy | null>(null);
   const styles = modeStyles[mode];
   const conversationRef = useRef<ReturnType<typeof useConversation> | null>(null);
+  const [saveFailure, setSaveFailure] = useState(false);
+  const [hasEnded, setHasEnded] = useState(false);
+  const queueRef = useRef<TranscriptQueue | null>(null);
+  const memoryRevision = useRef(0);
+  const connectedAt = useRef<number | null>(null);
+  const lastTranscriptAt = useRef<number | null>(null);
+  if (!queueRef.current && conversationId) queueRef.current = new TranscriptQueue(turns => poduApi.saveTurns(conversationId, turns));
+
+  const save = useCallback(async () => {
+    const ok = await queueRef.current?.flush();
+    if (ok !== undefined) setSaveFailure(!ok);
+  }, []);
+
+  const finish = useCallback(async () => {
+    await save();
+    if (conversationId) {
+      const result = await poduApi.endConversation(conversationId);
+      if (!result.ok) setSaveFailure(true);
+      setHasEnded(true);
+    }
+  }, [save, conversationId]);
 
   const conversation = useConversation({
     onConnect: () => {
       setStartFailure(null);
+      connectedAt.current = performance.now();
     },
-    onDisconnect: () => {},
-    onMessage: () => {},
+    onDisconnect: () => { void finish(); },
+    onMessage: ({ role, message, event_id }) => {
+      if (role === "user") lastTranscriptAt.current = performance.now();
+      if (typeof message === "string") queueRef.current?.push({ eventId: `${role}:${event_id}`, role, message });
+    },
+    onModeChange: ({ mode }) => {
+      if (mode === "speaking" && lastTranscriptAt.current !== null) {
+        performance.measure("podu-transcript-to-speech", { start: lastTranscriptAt.current, end: performance.now() });
+        lastTranscriptAt.current = null;
+      }
+    },
+    onInterruption: () => { lastTranscriptAt.current = null; },
+    onAgentResponseCorrection: (event) => {
+      queueRef.current?.push({ eventId: `agent:${event.event_id}`, role: "agent", message: event.corrected_agent_response });
+    },
     onError: (error: unknown) => {
       setStartFailure(describeException(error, "conversation"));
     },
@@ -84,7 +126,8 @@ export function ConversationView({
 
     // Request microphone permission
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const permission = await navigator.mediaDevices.getUserMedia({ audio: true });
+      permission.getTracks().forEach(track => track.stop());
     } catch (micError) {
       setStartFailure(describeException(micError, "conversation"));
       return;
@@ -94,7 +137,7 @@ export function ConversationView({
     // instead of throwing, so the server's failure is mapped here and nowhere
     // else, and the resulting copy is stored as-is — it never reaches
     // describeException(), which stays reserved for thrown values.
-    const tokenResult = await poduApi.getConversationToken(agentId);
+    const tokenResult = await poduApi.getConversationToken(agentId, conversationId);
     if (!tokenResult.ok) {
       setStartFailure(failureCopyFromApiError(tokenResult.error, "conversation", { mode }));
       return;
@@ -118,13 +161,15 @@ export function ConversationView({
     } catch (error) {
       setStartFailure(describeException(error, "conversation"));
     }
-  }, [conversation, agentId, mode, systemPrompt, firstMessage]);
+  }, [conversation, agentId, mode, systemPrompt, firstMessage, conversationId]);
 
   const stopConversation = useCallback(async () => {
     await conversation.endSession();
-  }, [conversation]);
+    await finish();
+  }, [conversation, finish]);
 
   const toggleConversation = () => {
+    if (hasEnded) { onClose(); return; }
     if (status === "connected") {
       stopConversation();
     } else {
@@ -141,10 +186,31 @@ export function ConversationView({
 
   // Cleanup on unmount using ref to avoid stale closure
   useEffect(() => {
+    const timer = setInterval(() => { void save(); }, 2500);
+    const pageHide = () => { void queueRef.current?.flush(); };
+    window.addEventListener("pagehide", pageHide);
     return () => {
+      clearInterval(timer);
+      window.removeEventListener("pagehide", pageHide);
       conversationRef.current?.endSession();
+      void queueRef.current?.flush();
+      if (conversationId && connectedAt.current !== null) void poduApi.endConversation(conversationId);
     };
-  }, []);
+  }, [conversationId, save]);
+
+  useEffect(() => {
+    if (!conversationId) return;
+    const timer = setInterval(async () => {
+      if (conversationRef.current?.status !== "connected" || conversationRef.current?.isSpeaking) return;
+      const result = await poduApi.getMemory(conversationId);
+      if (result.ok && result.data.revision > memoryRevision.current && result.data.context && conversationRef.current?.status === "connected") {
+        memoryRevision.current = result.data.revision;
+        // Silent context event: this never triggers a spoken turn.
+        conversationRef.current.sendContextualUpdate(result.data.context, { contextId: "podu-topic-memory" });
+      }
+    }, 20_000);
+    return () => clearInterval(timer);
+  }, [conversationId]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
@@ -207,6 +273,8 @@ export function ConversationView({
 
       {/* Main content */}
       <main className="relative z-10 flex-1 flex flex-col items-center justify-center px-6">
+        {saveFailure && <p role="status" className="text-sm mb-4">Transcript sync is delayed. We’ll retry while you keep talking.</p>}
+        {hasEnded && <button onClick={onClose} className="underline text-sm mb-4">Back to topics and saved conversations</button>}
         {/* Error banner */}
         {startFailure && (
           <div

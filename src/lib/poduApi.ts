@@ -44,6 +44,9 @@ export type ApiResult<T> =
 /** Code used when `fetch` itself rejects — no response, so no status. */
 export const NETWORK_ERROR_CODE = "network_error";
 
+let tokenProvider: (() => Promise<string | null>) | null = null;
+export function setTokenProvider(provider: typeof tokenProvider) { tokenProvider = provider; }
+
 const NETWORK_ERROR_MESSAGE =
   "Can't reach the PODU server — is bun dev still running?";
 
@@ -83,7 +86,13 @@ async function readBody(response: Response): Promise<unknown> {
 async function call<T>(input: string, init?: RequestInit): Promise<ApiResult<T>> {
   let response: Response;
   try {
-    response = await fetch(input, init);
+    const headers = new Headers(init?.headers);
+    if (tokenProvider) {
+      const token = await tokenProvider();
+      if (!token) return { ok: false, error: { code: "unauthenticated", message: "Sign in to continue.", status: 401 } };
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+    response = await fetch(input, { ...init, headers });
   } catch {
     return {
       ok: false,
@@ -115,6 +124,7 @@ const JSON_HEADERS = { "Content-Type": "application/json" } as const;
 
 /** Everything the client needs to hand to `<ConversationView>`. */
 export interface AgentSession {
+  conversationId?: string;
   agentId: string;
   systemPrompt: string;
   firstMessage: string;
@@ -139,16 +149,17 @@ export function clearApiKey(): Promise<ApiResult<{ ok: true }>> {
 export function getAgent(
   mode: ConversationMode,
   subjects: readonly string[],
+  options: { resumeId?: string; saveRecording?: boolean } = {},
 ): Promise<ApiResult<AgentSession>> {
   return call<AgentSession>("/api/agents", {
     method: "POST",
     headers: JSON_HEADERS,
-    body: JSON.stringify({ mode, subjects }),
+    body: JSON.stringify({ mode, subjects, ...options }),
   });
 }
 
-export function getConversationToken(agentId: string): Promise<ApiResult<{ token: string }>> {
-  return call(`/api/agents/${encodeURIComponent(agentId)}/conversation-token`);
+export function getConversationToken(agentId: string, conversationId?: string): Promise<ApiResult<{ token: string }>> {
+  return call(`/api/agents/${encodeURIComponent(agentId)}/conversation-token${conversationId ? `?conversationId=${encodeURIComponent(conversationId)}` : ""}`);
 }
 
 export function uploadDocument(file: File): Promise<ApiResult<DocumentMeta>> {
@@ -161,3 +172,19 @@ export function uploadDocument(file: File): Promise<ApiResult<DocumentMeta>> {
 export function deleteDocument(id: string): Promise<ApiResult<{ success: true }>> {
   return call(`/api/documents/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+
+export interface SavedConversation {
+  _id: string; mode: string; topics?: string[]; startedAt: number; durationSeconds: number;
+  saveRecording?: boolean; status?: string;
+}
+export interface TranscriptTurn { sequence: number; role: "user" | "agent"; message: string }
+export function listConversations() { return call<SavedConversation[]>("/api/conversations"); }
+export function saveTurns(id: string, turns: { eventId: string; role: "user" | "agent"; message: string }[]) {
+  return call(`/api/conversations/${encodeURIComponent(id)}/turns`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ turns }), keepalive: true });
+}
+export function endConversation(id: string) { return call(`/api/conversations/${encodeURIComponent(id)}/end`, { method: "POST", keepalive: true }); }
+export function getMemory(id: string) { return call<{ revision: number; context: string }>(`/api/conversations/${encodeURIComponent(id)}/memory`); }
+export function getTranscript(id: string) { return call<TranscriptTurn[]>(`/api/conversations/${encodeURIComponent(id)}/turns`); }
+export function getRecording(id: string) { return call<{ status: string; url: string | null }>(`/api/conversations/${encodeURIComponent(id)}/recording`); }
+export function deleteConversation(id: string) { return call(`/api/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }); }

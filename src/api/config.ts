@@ -1,6 +1,8 @@
 import type { ConfigStatus, ConversationMode } from "../shared/config";
 import { readSession, writeSessionCookie, clearSessionCookie, resolveApiKey } from "../lib/session";
 import { sendElevenLabsRequest } from "./elevenlabsClient";
+import { backend, isLocalMode } from "../lib/backend";
+import { api } from "../../convex/_generated/api";
 
 const AGENT_ID_ENV_VARS: Record<ConversationMode, string> = {
   fun: "ELEVENLABS_AGENT_ID_FUN",
@@ -17,6 +19,8 @@ function mask(key: string): string {
 }
 
 export async function getConfigStatus(req: Request): Promise<ConfigStatus> {
+  const client = backend(req);
+  if (client) return client.query(api.sessions.config, {});
   const session = await readSession(req);
   const sessionKey = session.apiKey ?? null;
   const envKey = process.env.ELEVENLABS_API_KEY ?? null;
@@ -81,6 +85,7 @@ export async function verifyApiKey(apiKey: string): Promise<{
 }
 
 export async function handleSetApiKey(req: Request): Promise<Response> {
+  if (!isLocalMode()) return Response.json({ error: "The ElevenLabs key is managed by the server." }, { status: 403 });
   let body: unknown;
   try {
     body = await req.json();

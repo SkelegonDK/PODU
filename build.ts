@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import plugin from "bun-plugin-tailwind";
+import { publicConfig } from "./src/lib/backend";
 import { existsSync } from "fs";
 import { rm } from "fs/promises";
 import path from "path";
@@ -33,7 +34,7 @@ Example:
   process.exit(0);
 }
 
-const toCamelCase = (str: string): string => str.replace(/-([a-z])/g, g => g[1].toUpperCase());
+const toCamelCase = (str: string): string => str.replace(/-([a-z])/g, g => g[1]!.toUpperCase());
 
 const parseValue = (value: string): any => {
   if (value === "true") return true;
@@ -48,7 +49,7 @@ const parseValue = (value: string): any => {
 };
 
 function parseArgs(): Partial<Bun.BuildConfig> {
-  const config: Partial<Bun.BuildConfig> = {};
+  const config: Record<string, any> = {};
   const args = process.argv.slice(2);
 
   for (let i = 0; i < args.length; i++) {
@@ -81,7 +82,7 @@ function parseArgs(): Partial<Bun.BuildConfig> {
     key = toCamelCase(key);
 
     if (key.includes(".")) {
-      const [parentKey, childKey] = key.split(".");
+      const [parentKey, childKey] = key.split(".") as [string, string];
       config[parentKey] = config[parentKey] || {};
       config[parentKey][childKey] = parseValue(value);
     } else {
@@ -131,9 +132,15 @@ const result = await Bun.build({
   sourcemap: "linked",
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
+    __PODU_PUBLIC_CONFIG__: JSON.stringify(publicConfig()),
   },
   ...cliConfig,
 });
+
+if (!result.success) {
+  console.error(result.logs);
+  process.exit(1);
+}
 
 const end = performance.now();
 

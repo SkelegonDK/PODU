@@ -51,6 +51,7 @@ export interface ElevenLabsRequestOptions {
   /** Query parameters. Values are URL-encoded here — callers must not pre-encode. */
   query?: Record<string, string>;
   timeoutMs?: number;
+  body?: unknown;
 }
 
 /** Builds a fully-encoded ElevenLabs URL. Exported for tests. */
@@ -118,7 +119,8 @@ export async function sendElevenLabsRequest(
   try {
     response = await fetch(buildElevenLabsUrl(options.path, options.query), {
       method: options.method ?? "GET",
-      headers: { "xi-api-key": options.apiKey },
+      headers: { "xi-api-key": options.apiKey, ...(options.body === undefined ? {} : { "Content-Type": "application/json" }) },
+      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {

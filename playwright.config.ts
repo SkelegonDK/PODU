@@ -55,7 +55,7 @@ export default defineConfig({
      * throwaway database so a test run can't append to the developer's real
      * ./podu.db document library.
      */
-    env: { PODU_DB_PATH: join(tmpdir(), "podu-e2e.db") },
+    env: { PODU_LOCAL_MODE: "true", PODU_DB_PATH: join(tmpdir(), "podu-e2e.db") },
     url: "http://127.0.0.1:3000/api/health",
     reuseExistingServer: !process.env.CI,
     timeout: 120 * 1000,

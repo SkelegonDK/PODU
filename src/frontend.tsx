@@ -1,18 +1,19 @@
 /**
  * React entry point — mounts the app into #root.
- * No auth providers: single-user local demo.
+ * Clerk authenticates users; Convex stores their conversation history.
  */
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import { App } from "./App";
+import { AuthProvider } from "./components/AuthProvider";
 
 const elem = document.getElementById("root")!;
 
 const app = (
   <StrictMode>
-    <App />
+    <AuthProvider><App /></AuthProvider>
   </StrictMode>
 );
 

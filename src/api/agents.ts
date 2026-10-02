@@ -2,6 +2,7 @@ import type { ConversationMode } from "../components/ModeSelector";
 import { AGENT_PROMPTS } from "./agentPrompts";
 import { renderDocumentsContext, type StoredDocument } from "./knowledgebase";
 import { fetchElevenLabsJson, type ElevenLabsFailure } from "./elevenlabsClient";
+import { PODCAST_DIRECTION } from "./podcastProfile";
 
 // Subject ID → display name mapping (must match SubjectSelector)
 const SUBJECT_NAMES: Record<string, string> = {
@@ -49,7 +50,7 @@ export function buildFullPrompt(
     ? `\n\nTOPIC FOCUS (NON-NEGOTIABLE):\nThe user has selected these specific topics: ${subjectNames.join(", ")}.\n- Discuss ONLY these topics.\n- Do NOT bring up artificial intelligence, machine learning, or any subject not in the list above, even tangentially.\n- If the conversation drifts off-topic, steer it back to the selected topics.`
     : "";
 
-  const prompt = basePrompt + topicSection + renderDocumentsContext(documents);
+  const prompt = basePrompt + PODCAST_DIRECTION + topicSection + renderDocumentsContext(documents);
 
   // ElevenLabs silently DISCARDS an empty prompt override, which would hand the
   // caller a conversation running on the dashboard's default persona with no
